@@ -27,12 +27,15 @@ import { chatSupervisorScenario } from "@/app/agentConfigs/chatSupervisor";
 import { customerServiceRetailCompanyName } from "@/app/agentConfigs/customerServiceRetail";
 import { chatSupervisorCompanyName } from "@/app/agentConfigs/chatSupervisor";
 import { simpleHandoffScenario } from "@/app/agentConfigs/simpleHandoff";
+import { restoranScenario } from "@/app/agentConfigs/restoran";
+import { restoranCompanyName } from "@/app/agentConfigs/restoran";
 
 // Map used by connect logic for scenarios defined via the SDK.
 const sdkScenarioMap: Record<string, RealtimeAgent[]> = {
   simpleHandoff: simpleHandoffScenario,
   customerServiceRetail: customerServiceRetailScenario,
   chatSupervisor: chatSupervisorScenario,
+  restoran: restoranScenario,
 };
 
 import useAudioDownload from "./hooks/useAudioDownload";
@@ -214,6 +217,8 @@ function App() {
 
         const companyName = agentSetKey === 'customerServiceRetail'
           ? customerServiceRetailCompanyName
+          : agentSetKey === 'restoran'
+          ? restoranCompanyName
           : chatSupervisorCompanyName;
         const guardrail = createModerationGuardrail(companyName);
 
