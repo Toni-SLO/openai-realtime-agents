@@ -248,6 +248,15 @@ export async function GET(request: NextRequest) {
     });
   }
 
+  if (action === 'status') {
+    // Status endpoint - vrne 200 če je MCP client pripravljen
+    if (mcpClient) {
+      return NextResponse.json({ ready: true, mode: 'mcp' });
+    } else {
+      return NextResponse.json({ ready: false, mode: 'fallback' }, { status: 503 });
+    }
+  }
+
   if (action === 'test-reservation') {
     console.log('=== TESTING RESERVATION ===');
     try {
@@ -366,7 +375,10 @@ export async function POST(request: NextRequest) {
     const toolNameMap: { [key: string]: string } = {
       'createReservation': 's6792596_fancita_rezervation_supabase',
       'createOrder': 's6798488_fancita_order_supabase',
-      'transfer_to_staff': 'transfer_to_staff'
+      'transfer_to_staff': 'transfer_to_staff',
+      // Direct tool name mapping
+      's6792596_fancita_rezervation_supabase': 's6792596_fancita_rezervation_supabase',
+      's6798488_fancita_order_supabase': 's6798488_fancita_order_supabase'
     };
 
     const fullToolName = toolNameMap[action] || action;
@@ -384,7 +396,13 @@ export async function POST(request: NextRequest) {
     } else {
       // Use fallback webhook
       console.log('🔄 Using fallback webhook for:', action);
-      const webhookId = action === 'createReservation' ? 's6792596' : 's6798488';
+      let webhookId = 's6798488'; // default to order
+      if (action === 'createReservation' || action === 's6792596_fancita_rezervation_supabase') {
+        webhookId = 's6792596';
+      } else if (action === 'createOrder' || action === 's6798488_fancita_order_supabase') {
+        webhookId = 's6798488';
+      }
+      console.log('🔄 Using webhook ID:', webhookId, 'for action:', action);
       result = await callMakeWebhook(webhookId, data);
     }
 
