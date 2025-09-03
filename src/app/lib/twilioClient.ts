@@ -1,4 +1,6 @@
 // Twilio Client for call handoff
+import '@/app/lib/envSetup';
+
 export class TwilioClient {
   private accountSid: string;
   private authToken: string;
@@ -39,6 +41,59 @@ export class TwilioClient {
     if (!response.ok) {
       const errorData = await response.text();
       throw new Error(`Twilio API error: ${response.status} - ${errorData}`);
+    }
+
+    return await response.json();
+  }
+
+  // Create TwiML response for incoming calls (privzeto ne preusmeri na osebje)
+  createTwiMLResponse(message: string = 'Pozdravljeni, tukaj restavracija Fančita. Kako vam lahko pomagam?'): string {
+    return `<?xml version="1.0" encoding="UTF-8"?>
+    <Response>
+        <Say language="sl-SI" voice="woman">${message}</Say>
+    </Response>`;
+  }
+
+  // Handle incoming call webhook: vrni TwiML z Media Streams povezavo
+  async handleIncomingCall(callData: any) {
+    console.log('Incoming call received:', callData);
+
+    const streamBase = process.env.STREAM_BASE_URL || '';
+    const streamUrl = streamBase
+      ? `${streamBase}`
+      : `${process.env.WEBHOOK_BASE_URL || ''}/api/twilio/stream`;
+    const greeting = 'Povezujem vas z agentom. Trenutek prosim.';
+
+    const twiml = `<?xml version="1.0" encoding="UTF-8"?>
+    <Response>
+      <Say language="sl-SI" voice="woman">${greeting}</Say>
+      <Connect>
+        <Stream url="${streamUrl}" />
+      </Connect>
+    </Response>`;
+
+    console.log('Generated TwiML response:', twiml);
+    return twiml;
+  }
+
+  // Get call status
+  async getCallStatus(callSid: string) {
+    if (!this.accountSid || !this.authToken) {
+      throw new Error('Twilio credentials not configured');
+    }
+
+    const url = `https://api.twilio.com/2010-04-01/Accounts/${this.accountSid}/Calls/${callSid}.json`;
+    const auth = btoa(`${this.accountSid}:${this.authToken}`);
+
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Basic ${auth}`,
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to get call status: ${response.status}`);
     }
 
     return await response.json();

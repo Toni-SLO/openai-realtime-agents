@@ -1,82 +1,90 @@
 import { RealtimeAgent, tool } from '@openai/agents/realtime';
-import { twilioClient } from '@/app/lib/twilioClient';
+import { FANCITA_HANDOFF_INSTRUCTIONS, replaceInstructionVariables } from '../shared/instructions';
+// Odstranjeno: neposreden uvoz twilioClient v agentskem (lahko konča v client bundle)
+// Twilio klice izvedemo preko API route, ne neposredno prek SDK v clientskem kontekstu
 
 export const handoffAgent = new RealtimeAgent({
   name: 'handoff',
-  voice: 'sage',
+  voice: 'marin',
   handoffDescription: 'Agent that handles complex cases and transfers calls to restaurant staff.',
 
-  instructions: `
-# Fančita Handoff Agent
-
-## 0) Sistem & konstante
-- \`tel\` vedno = \`{{system__caller_id}}\`
-- \`source_id\` vedno = \`{{system__conversation_id}}\`
-
-## 1) Osebnost in stil
-- Ti si **Maja**, prijazna asistentka restavracije Fančita v Vrsarju.
-- Vikanje, topel ton, pomirjujoč.
-
-## 2) Namen
-- Obravnavam kompleksne primere ki jih drugi agenti ne morejo rešiti
-- Pomagam jeznim ali frustriranim gostom
-- Prenos klicev na osebje restavracije
-
-## 3) Handoff procedura
-Če gost želi govoriti z osebjem ali se pogovor preveč zaplete:
-1. Rekni: »Spojim vas s kolegom iz Fančite. Samo trenutak.«
-2. Počakaj 3 sekunde
-3. Pokliči Twilio tool za prenos klica na \`+386 40 341 045\`
-4. Če prenos uspe: »Prenos je uspešen. Lahko govorite z našim osebjem.«
-
-## 4) Validacije
-- Vedno preveri ali imaš veljavno telefonsko številko gosta
-- Če Twilio klic ne uspe → ponovi ali obvesti gosta o težavi
-
-## 5) Pomirjanje
-- Bodite empatični do jezih gostov
-- Poslušajte njihove težave
-- Ponudite hitro rešitev ali prenos
-`,
+  instructions: FANCITA_HANDOFF_INSTRUCTIONS,
 
   tools: [
     tool({
       name: 'transfer_to_staff',
-      description: 'Transfer the call to restaurant staff using Twilio',
+      description: 'Transfer the call to restaurant staff with problem summary',
       parameters: {
         type: 'object',
+        additionalProperties: false,
         properties: {
           guest_number: {
             type: 'string',
             description: 'Guest phone number to transfer from',
+          },
+          problem_summary: {
+            type: 'string',
+            description: 'Brief summary of the guest problem/request',
           },
           staff_number: {
             type: 'string',
             description: 'Staff phone number to transfer to',
             default: '+38640341045',
           },
-          reason: {
-            type: 'string',
-            description: 'Reason for transfer (optional)',
-          },
         },
-        required: ['guest_number'],
+        required: ['guest_number', 'problem_summary'],
       },
       execute: async (input: any) => {
         try {
           const staffNumber = input.staff_number || '+38640341045';
+          const problemSummary = input.problem_summary || 'Guest transfer request';
 
           console.log(`Transferring call from ${input.guest_number} to ${staffNumber}`);
+          console.log(`Problem summary: ${problemSummary}`);
 
-          const result = await twilioClient.transferCall(input.guest_number, staffNumber);
+          // First call staff to inform them about the incoming transfer
+          const staffCallRes = await fetch('/api/twilio/test', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+              to: staffNumber, 
+              from: '+385528940001', // Restaurant main number
+              message: `Incoming transfer - Guest problem: ${problemSummary}. Press 1 to accept transfer.`
+            }),
+          } as any);
+          
+          if (!staffCallRes.ok) {
+            const text = await staffCallRes.text();
+            throw new Error(`Staff notification failed: ${staffCallRes.status} ${text}`);
+          }
+
+          // Wait a moment for staff to answer, then transfer the guest
+          setTimeout(async () => {
+            try {
+              const guestTransferRes = await fetch('/api/twilio/test', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                  to: staffNumber, 
+                  from: input.guest_number,
+                  conference: true // Enable conference to connect both parties
+                }),
+              } as any);
+            } catch (e) {
+              console.error('Guest transfer failed:', e);
+            }
+          }, 3000); // 3 second delay
 
           return {
             success: true,
-            call_sid: result.sid,
-            status: result.status,
-            message: 'Call transfer initiated successfully',
+            data: { 
+              staff_number: staffNumber, 
+              guest_number: input.guest_number,
+              problem_summary: problemSummary
+            },
+            message: `Staff notified about: ${problemSummary}. Transferring guest now.`,
           };
-        } catch (error) {
+        } catch (error: any) {
           console.error('Call transfer failed:', error);
           return {
             success: false,
@@ -87,36 +95,7 @@ export const handoffAgent = new RealtimeAgent({
       },
     }),
 
-    tool({
-      name: 'hangup_call',
-      description: 'Hang up the current call',
-      parameters: {
-        type: 'object',
-        properties: {
-          call_sid: {
-            type: 'string',
-            description: 'Twilio call SID to hang up',
-          },
-        },
-        required: ['call_sid'],
-      },
-      execute: async (input: any) => {
-        try {
-          const result = await twilioClient.hangupCall(input.call_sid);
-
-          return {
-            success: true,
-            message: 'Call ended successfully',
-          };
-        } catch (error) {
-          console.error('Call hangup failed:', error);
-          return {
-            success: false,
-            error: error.message,
-          };
-        }
-      },
-    }),
+    // Hangup tool za zdaj odstranjen; lahko ga dodamo nazaj po potrebi
   ],
 
   handoffs: [], // No further handoffs from this agent

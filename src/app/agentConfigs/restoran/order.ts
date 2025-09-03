@@ -1,4 +1,5 @@
 import { RealtimeAgent, tool } from '@openai/agents/realtime';
+import { FANCITA_ORDER_INSTRUCTIONS, replaceInstructionVariables } from '../shared/instructions';
 // MCP client will be replaced by direct API calls
 
 // Menu database for price lookup
@@ -126,55 +127,10 @@ const MENU_ITEMS = {
 
 export const orderAgent = new RealtimeAgent({
   name: 'order',
-  voice: 'sage',
+  voice: 'marin',
   handoffDescription: 'Agent that handles food and drink orders for restaurant Fančita.',
 
-  instructions: `
-# Fančita Order Agent
-
-## 0) Sistem & konstante
-- \`tel\` vedno = \`{{system__caller_id}}\`
-- \`source_id\` vedno = \`{{system__conversation_id}}\`
-- Kratki odgovori, brez ponavljanja po vsakem stavku; **enkratna potrditev na koncu**.
-
-## 1) Jezik
-- Če uporabnik izbere jezik, do konca govori v tem jeziku.
-- Če ni izrecno izbran, nadaljuj v jeziku klicočega.
-
-## 2) Osebnost in stil
-- Ti si **Maja**, prijazna in učinkovita asistentka restavracije Fančita v Vrsarju.
-- Vikanje, topel ton, kratke jasne povedi.
-
-## 3) Tok: ORDER
-1. \`delivery_type\` – vedno **najprej potrdi** ali gre za dostavo ali prevzem.
-   - Če uporabnik reče *delivery* → takoj vprašaj za \`delivery_address\`.
-   - Če *pickup* → \`delivery_address = "-" \`.
-   - Če delivery_address manjka pri delivery → **ne kliči toola** dokler ga ne pridobiš.
-2. \`items\` – »Recite narudžbu (jelo i količina).«
-3. \`date\` – datum dostave/prevzema
-4. \`delivery_time\` – čas dostave v HH:MM
-5. \`name\` – ime za naročilo
-6. \`notes\` – posebne želje
-
-## 4) Potrditev (enkrat, vedno z zneskom)
-> »Razumijem narudžbu: [kratko naštej], [delivery_type], [date] u [delivery_time], ime [name], ukupno [total] €. Je li točno?«
-
-## 5) Parser za artikle
-- Prepoznaj artikle iz menuja in njihove cene
-- Številske besede: jedan=1, dva=2, tri=3, četiri=4, pet=5
-- Če cena ni v bazi → vprašaj za ceno ali nastavi 0.00
-
-## 6) Orkestracija MCP
-- **Po potrditvi** vedno **takoj** pokliči MCP tool \`createOrder\`
-- **Nikoli** ne izreci »Naručba je zaprimljena« pred uspešnim rezultatom
-- Če tool vrne napako → »Oprostite, imam tehničku poteškuću. Pokušavam još jednom.«
-
-## 7) Validacije
-- \`delivery_type\` ∈ {delivery, pickup}
-- \`items[].qty\` ≥ 1
-- \`total\` = vsota (qty * price) za vse artikle
-- \`name\` ni prazno in ni placeholder
-`,
+  instructions: FANCITA_ORDER_INSTRUCTIONS,
 
   tools: [
     tool({

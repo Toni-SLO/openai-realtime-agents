@@ -1,3 +1,4 @@
 import dotenv from 'dotenv';
 
-dotenv.config({path: './env'})
+// Strežniško nalaganje .env (brez odvisnosti od 'fs', varno za bundler)
+dotenv.config({ path: '.env' });
