@@ -53,13 +53,23 @@ function cleanData(data: any): any {
 async function callMakeWebhook(webhookId: string, data: any) {
   const cleanedData = cleanData(data);
 
-  // Try different Make.com webhook URL formats
-  const possibleUrls = [
+  // Use environment variable if set, otherwise try different formats
+  const possibleUrls = [];
+  
+  // Add environment-specific URLs first
+  if (webhookId.includes('s6792596') && process.env.MAKE_WEBHOOK_RESERVATION) {
+    possibleUrls.push(process.env.MAKE_WEBHOOK_RESERVATION);
+  }
+  if (webhookId.includes('s6798488') && process.env.MAKE_WEBHOOK_ORDER) {
+    possibleUrls.push(process.env.MAKE_WEBHOOK_ORDER);
+  }
+  
+  // Fallback to auto-detection
+  possibleUrls.push(
     `https://hook.eu2.make.com/${webhookId}`,
     `https://eu2.make.com/hooks/${webhookId}`,
-    `https://webhook.eu2.make.com/${webhookId}`,
     `https://hook.eu2.make.com/${webhookId.replace(/\D/g, '')}`,
-  ];
+  );
 
   for (const url of possibleUrls) {
     try {
@@ -159,8 +169,15 @@ async function initializeMCPClient() {
   try {
     console.log('🔗 Connecting to Make MCP server via SSE...');
 
-    // Create SSE transport
-    const transport = new SSEClientTransport(new URL(sseUrl));
+    // Create SSE transport with API key if provided
+    const transportOptions: any = {};
+    if (process.env.MCP_API_KEY) {
+      transportOptions.headers = {
+        'Authorization': `Bearer ${process.env.MCP_API_KEY}`
+      };
+    }
+    
+    const transport = new SSEClientTransport(new URL(sseUrl), transportOptions);
 
     // Create MCP client
     const client = new Client(
@@ -383,17 +400,35 @@ export async function POST(request: NextRequest) {
 
     const fullToolName = toolNameMap[action] || action;
 
-    if (mcpClient) {
-      // Use MCP client
-      console.log('🔗 Using MCP client for:', fullToolName);
-      result = await mcpClient.request(
-        {
-          method: 'tools/call',
-          params: { name: fullToolName, arguments: data }
-        },
-        CallToolResultSchema
-      );
-    } else {
+    // Try to use MCP client if available or wait for it to initialize
+    if (mcpClient || process.env.MCP_SERVER_URL) {
+      // Wait for MCP initialization if not ready yet
+      if (!mcpClient && process.env.MCP_SERVER_URL) {
+        console.log('⏳ Waiting for MCP client to initialize...');
+        let attempts = 0;
+        while (!mcpClient && attempts < 10) { // Wait up to 5 seconds
+          await new Promise(resolve => setTimeout(resolve, 500));
+          attempts++;
+        }
+      }
+      
+      if (mcpClient) {
+        // Use MCP client
+        console.log('🔗 Using MCP client for:', fullToolName);
+        result = await mcpClient.request(
+          {
+            method: 'tools/call',
+            params: { name: fullToolName, arguments: data }
+          },
+          CallToolResultSchema
+        );
+      } else {
+        console.log('⚠️ MCP client not ready, falling back to webhooks');
+        // Fall through to webhook fallback
+      }
+    }
+    
+    if (!result) {
       // Use fallback webhook
       console.log('🔄 Using fallback webhook for:', action);
       let webhookId = 's6798488'; // default to order

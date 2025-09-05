@@ -4,8 +4,8 @@ import { WebSocketServer } from 'ws';
 import { RealtimeSession } from '@openai/agents-realtime';
 
 // NOTE: We load TS agent configs via ts-node loader (see package.json script)
-import restoranPkg from '../src/app/agentConfigs/restoran/index.ts';
-const { restoranScenario } = restoranPkg;
+import restoranPkg from '../src/app/agentConfigs/restoran/unified.ts';
+const { unifiedRestoranAgent } = restoranPkg;
 
 const PORT = parseInt(process.env.BRIDGE_PORT || '3001', 10);
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
@@ -90,8 +90,7 @@ wss.on('connection', (ws, req) => {
       try { ws.__streamSid = streamSid; } catch {}
 
       try {
-        const initialAgents = restoranScenario;
-        const rootAgent = initialAgents[0];
+        const rootAgent = unifiedRestoranAgent;
 
         const session = new RealtimeSession(rootAgent, {
           transport: 'websocket',

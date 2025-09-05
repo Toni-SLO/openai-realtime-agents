@@ -4,11 +4,90 @@
 // Deduplicate accepts per call_id within this process
 const acceptedCallIds = new Set<string>();
 
-// Inline centralized instructions to avoid import issues in API routes
-const FANCITA_RESERVATION_INSTRUCTIONS = `
-# Fančita Reservation Agent
+// Transcript bridge connection for realtime sharing
+import WebSocket from 'isomorphic-ws';
 
-## 0) Sistem & konstante
+let transcriptBridgeWs: WebSocket | null = null;
+
+function connectTranscriptBridge() {
+  const bridgeUrl = process.env.TRANSCRIPT_BRIDGE_URL || 'ws://localhost:3002';
+  
+  try {
+    transcriptBridgeWs = new WebSocket(bridgeUrl);
+    
+    transcriptBridgeWs.on('open', () => {
+      console.log('[openai-webhook] Connected to transcript bridge');
+    });
+    
+    transcriptBridgeWs.on('close', () => {
+      console.log('[openai-webhook] Transcript bridge disconnected');
+      transcriptBridgeWs = null;
+      
+      // Reconnect after 3 seconds
+      setTimeout(connectTranscriptBridge, 3000);
+    });
+    
+    transcriptBridgeWs.on('error', (error) => {
+      console.error('[openai-webhook] Transcript bridge error:', error);
+    });
+    
+  } catch (error) {
+    console.error('[openai-webhook] Failed to connect to transcript bridge:', error);
+  }
+}
+
+function sendTranscriptEvent(sessionId: string, event: any) {
+  // File-based transcript logging (WebSocket alternative)
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    
+    const transcriptsDir = path.join(process.cwd(), 'logs', 'transcripts');
+    if (!fs.existsSync(transcriptsDir)) {
+      fs.mkdirSync(transcriptsDir, { recursive: true });
+    }
+    
+    const logFile = path.join(transcriptsDir, `${sessionId}.log`);
+    const timestamp = new Date().toISOString();
+    const logEntry = `[${timestamp}] ${JSON.stringify(event)}\n`;
+    
+    fs.appendFileSync(logFile, logEntry);
+    console.log(`[transcript] Logged to ${logFile}:`, event.type);
+    
+  } catch (error) {
+    console.warn('[transcript] Error logging event:', error.message);
+  }
+}
+
+function endTranscriptSession(sessionId: string) {
+  // File-based transcript ending
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    
+    const transcriptsDir = path.join(process.cwd(), 'logs', 'transcripts');
+    const logFile = path.join(transcriptsDir, `${sessionId}.log`);
+    const timestamp = new Date().toISOString();
+    const logEntry = `[${timestamp}] {"type":"session_end","sessionId":"${sessionId}"}\n`;
+    
+    if (fs.existsSync(logFile)) {
+      fs.appendFileSync(logFile, logEntry);
+      console.log(`[transcript] Session ended: ${logFile}`);
+    }
+    
+  } catch (error) {
+    console.warn('[transcript] Error ending session:', error.message);
+  }
+}
+
+// Initialize transcript bridge connection - DISABLED due to WebSocket issues
+// connectTranscriptBridge();
+
+// Inline unified instructions for SIP webhook (to avoid Next.js import issues)
+const FANCITA_UNIFIED_INSTRUCTIONS = `
+# Fančita Restaurant Agent
+
+## 0) System & constants
 - tel vedno = {{system__caller_id}}
 - source_id vedno = {{system__conversation_id}}
 - Privzeta lokacija rezervacije: terasa
@@ -45,25 +124,7 @@ Vprašaj samo za manjkajoče podatke v tem vrstnem redu:
 - Če potrdi → **TAKOJ kliči tool s6792596_fancita_rezervation_supabase**
 - Po uspehu: "Rezervacija je zavedena. Vidimo se u Fančiti."
 
-## 5) Validacije
-- location ∈ {vrt, terasa, unutra} (male črke)
-- guests_number ≥ 1
-- date v formatu YYYY-MM-DD
-- time v formatu HH:MM (24h)
-- name ni prazno
-
-## 6) KLJUČNO: MCP Orkestracija
-- **Po potrditvi podatkov** vedno **takoj** pokliči MCP tool s6792596_fancita_rezervation_supabase
-- **Nikoli** ne izreci "Rezervacija je zavedena" pred uspešnim rezultatom tool-a
-- Če tool vrne napako → "Oprostite, imam tehničku poteškuću. Pokušavam još jednom."
-
-## 7) Časovne pretvorbe
-- "danas" → današnji datum
-- "sutra" / "jutri" → današnji datum + 1
-- "šest ujutro" → 06:00
-- "šest popodne" / "šest zvečer" → 18:00
-
-## 8) Tok: ORDER
+## 5) Tok: ORDER
 Vprašaj samo za manjkajoče podatke v tem vrstnem redu:
 1. delivery_type – vedno **najprej potrdi** ali gre za dostavo ali prevzem.
    - Če uporabnik reče *delivery* → takoj vprašaj za delivery_address.
@@ -80,13 +141,81 @@ Vprašaj samo za manjkajoče podatke v tem vrstnem redu:
 - Če potrdi → **TAKOJ kliči tool s6798488_fancita_order_supabase**
 - Po uspehu: "Narudžba je zaprimljena. Hvala vam!"
 
-## 9) Tok: HANDOFF
+## 6) Tok: HANDOFF
 **VEDNO ko gost želi govoriti z osebjem:**
 1. **POVZEMI PROBLEM** - "Razumem da imate problem z [kratko opiši]"
 2. **POKLIČI OSEBJE** - Uporabi tool transfer_to_staff  
 3. **SPOROČI OSEBJU** - "Zdravo, imam gosta na liniji z naslednjim problemom: [povzemi]. Lahko ga povežem?"
 4. **POVEŽI GOSTA** - "Povezujem vas z našim osebjem. Trenutak prosim."
+
+## 7) Validacije
+- location ∈ {vrt, terasa, unutra} (male črke)
+- guests_number ≥ 1
+- date v formatu YYYY-MM-DD
+- time v formatu HH:MM (24h)
+- name ni prazno
+
+## 8) KLJUČNO: MCP Orkestracija
+- **Po potrditvi podatkov** vedno **takoj** pokliči ustrezni MCP tool
+- **Nikoli** ne izreci potrditve pred uspešnim rezultatom tool-a
+- Če tool vrne napako → "Oprostite, imam tehničku poteškuću. Pokušavam još jednom."
+
+## 9) Časovne pretvorbe
+- "danas" → današnji datum
+- "sutra" / "jutri" → današnji datum + 1
+- "šest ujutro" → 06:00
+- "šest popodne" / "šest zvečer" → 18:00
 `;
+
+// Helper function to replace instruction variables
+function replaceInstructionVariables(instructions: string, callerId: string, conversationId: string): string {
+  return instructions
+    .replace(/\{\{system__caller_id\}\}/g, callerId)
+    .replace(/\{\{system__conversation_id\}\}/g, conversationId);
+}
+
+// Safe WebSocket send wrapper using isomorphic-ws
+function safeSend(ws: any, data: any, description = 'message') {
+  try {
+    const message = JSON.stringify(data);
+    
+    // Check if WebSocket is ready
+    if (ws.readyState !== WebSocket.OPEN) {
+      console.warn(`[openai-webhook] WebSocket not ready for ${description}, state: ${ws.readyState}`);
+      return false;
+    }
+    
+    // Standard WebSocket send with isomorphic-ws
+    ws.send(message);
+    console.log(`[openai-webhook] ✅ Sent ${description}`);
+    return true;
+  } catch (error) {
+    console.error(`[openai-webhook] ❌ Failed to send ${description}:`, error.message);
+    
+    // If WebSocket fails and it's a critical message, try HTTP fallback
+    if (description === 'session.update') {
+      console.log(`[openai-webhook] Attempting HTTP fallback for session configuration...`);
+      // This would be implemented if needed
+    }
+    
+    return false;
+  }
+}
+
+// Emergency fallback - return proper TwiML for direct audio
+function returnDirectAudioResponse(voice = 'marin') {
+  return new NextResponse(`<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Say voice="${voice}" language="hr-HR">
+    Restoran Fančita, Maja kod telefona. Kako vam mogu pomoći?
+  </Say>
+  <Pause length="30"/>
+</Response>`, {
+    headers: { 
+      'Content-Type': 'text/xml'
+    }
+  });
+}
 
 const FANCITA_RESERVATION_TOOL = {
   type: 'function' as const,
@@ -161,16 +290,7 @@ const FANCITA_HANDOFF_TOOL = {
   },
 };
 
-// Helper function to replace template variables in instructions
-function replaceInstructionVariables(
-  instructions: string, 
-  callerId: string, 
-  conversationId: string
-): string {
-  return instructions
-    .replace(/\{\{system__caller_id\}\}/g, callerId)
-    .replace(/\{\{system__conversation_id\}\}/g, conversationId);
-}
+// replaceInstructionVariables already defined above
 
 // Handle MCP tool execution for reservation  
 async function handleReservationTool(ws: any, functionCallId: string, args: string, callerPhone: string, callId: string) {
@@ -243,9 +363,9 @@ async function handleReservationTool(ws: any, functionCallId: string, args: stri
     
     // Auto-hangup logic - set flag regardless of MCP success for SIP calls
     // For SIP calls, we always want to hangup after final message
-    global.pendingHangup = { callId, ws };
+    (global as any).pendingHangup = { callId, ws };
     console.log('[openai-webhook] Will hangup after TTS completes for callId:', callId);
-    console.log('[openai-webhook] Set global.pendingHangup (regardless of MCP success):', global.pendingHangup);
+    console.log('[openai-webhook] Set (global as any).pendingHangup (regardless of MCP success):', (global as any).pendingHangup);
     
     if (result.success) {
       console.log('[openai-webhook] MCP call successful');
@@ -315,7 +435,7 @@ async function handleOrderTool(ws: any, functionCallId: string, args: string, ca
     // Add prices to items if missing
     const processedItems = params.items.map((item: any) => ({
       ...item,
-      price: item.price || MENU_ITEMS[item.name] || 0
+      price: item.price || (MENU_ITEMS as any)[item.name] || 0
     }));
 
     // Call MCP API for order
@@ -358,9 +478,9 @@ async function handleOrderTool(ws: any, functionCallId: string, args: string, ca
     
     // Auto-hangup logic - set flag regardless of MCP success for SIP calls
     // For SIP calls, we always want to hangup after final message
-    global.pendingHangup = { callId, ws };
+    (global as any).pendingHangup = { callId, ws };
     console.log('[openai-webhook] Will hangup after TTS completes for callId:', callId);
-    console.log('[openai-webhook] Set global.pendingHangup (regardless of MCP success):', global.pendingHangup);
+    console.log('[openai-webhook] Set (global as any).pendingHangup (regardless of MCP success):', (global as any).pendingHangup);
     
     if (result.success) {
       console.log('[openai-webhook] MCP call successful');
@@ -450,7 +570,7 @@ async function handleHandoffTool(ws: any, functionCallId: string, args: string, 
     }));
     
     // Auto-hangup after handoff completion
-    global.pendingHangup = { callId, ws };
+    (global as any).pendingHangup = { callId, ws };
     console.log('[openai-webhook] Will hangup after handoff TTS completes for callId:', callId);
 
   } catch (error) {
@@ -528,7 +648,7 @@ export async function POST(req: Request): Promise<Response> {
       // Extract caller info for template replacement in accept
       const callerFrom = event?.data?.sip_headers?.find((h: any) => h.name === 'From')?.value || 'unknown';
       const callerPhone = callerFrom; // Store for use in tool handler
-      const acceptInstructions = replaceInstructionVariables(FANCITA_RESERVATION_INSTRUCTIONS, callerFrom, callId);
+      const acceptInstructions = replaceInstructionVariables(FANCITA_UNIFIED_INSTRUCTIONS, callerFrom, callId);
 
       const acceptPayload = {
         type: 'realtime',
@@ -623,50 +743,60 @@ export async function POST(req: Request): Promise<Response> {
           const ws = new WebSocket(url, { headers });
           ws.on('open', () => {
             console.log('[openai-webhook] ws open for', callId);
+            
+            // Send session start event
+            sendTranscriptEvent(callId, {
+              type: 'session_start',
+              metadata: { 
+                source: 'sip_call',
+                caller: callerPhone,
+                timestamp: new Date().toISOString()
+              }
+            });
             try {
               // Extract caller info for template replacement
               const callerFrom = event?.data?.sip_headers?.find((h: any) => h.name === 'From')?.value || 'unknown';
               
-              // Replace template variables in instructions
-              const instructions = replaceInstructionVariables(FANCITA_RESERVATION_INSTRUCTIONS, callerFrom, callId);
+              // Replace template variables in instructions  
+              const instructions = replaceInstructionVariables(FANCITA_UNIFIED_INSTRUCTIONS, callerFrom, callId);
               
-              const tools = [FANCITA_RESERVATION_TOOL, FANCITA_ORDER_TOOL, FANCITA_HANDOFF_TOOL];
+              // Use manual tools (Native MCP structure not yet supported for SIP Realtime)
+              const tools = [
+                FANCITA_RESERVATION_TOOL, 
+                FANCITA_ORDER_TOOL, 
+                FANCITA_HANDOFF_TOOL
+              ];
 
-              ws.send(
-                JSON.stringify({
-                  type: 'session.update',
-                  session: {
-                    input_audio_format: SIP_CODEC,
-                    output_audio_format: SIP_CODEC,
-                    voice: VOICE,
-                    instructions: instructions,
-                    turn_detection: { type: 'semantic_vad' },
-                    tools: tools,
-                    tool_choice: 'auto',
-                    temperature: 0.8,
-                  }
-                })
-              );
+              safeSend(ws, {
+                type: 'session.update',
+                session: {
+                  input_audio_format: SIP_CODEC,
+                  output_audio_format: SIP_CODEC,
+                  voice: VOICE,
+                  instructions: instructions,
+                  turn_detection: { type: 'semantic_vad' },
+                  tools: tools,
+                  tool_choice: 'auto',
+                  temperature: 0.8,
+                }
+              }, 'session.update');
               console.log('[openai-webhook] session.update sent');
               
               // Dodaj simuliran user input da sproži pozdrav
               setTimeout(() => {
-                ws.send(JSON.stringify({
+                safeSend(ws, {
                   type: 'conversation.item.create',
                   item: {
                     type: 'message',
                     role: 'user',
                     content: [{ type: 'input_text', text: '*klic se vzpostavlja*' }]
                   }
-                }));
+                }, 'conversation.item.create');
                 
                 // Nato sproži response
-                ws.send(
-                  JSON.stringify({
-                    type: 'response.create',
-                  })
-                );
-                console.log('[openai-webhook] user input and response.create sent');
+                safeSend(ws, {
+                  type: 'response.create',
+                }, 'response.create');
               }, 100);
             } catch (e) {
               console.warn('[openai-webhook] session setup failed', e);
@@ -692,12 +822,32 @@ export async function POST(req: Request): Promise<Response> {
                 console.log('[openai-webhook] Full session:', JSON.stringify(ev, null, 2));
               } else if (ev?.type === 'conversation.item.input_audio_transcription.completed') {
                 console.log('[openai-webhook] ASR Completed:', ev?.transcript || 'no transcript');
+                
+                // Send transcript event for user speech
+                if (ev?.transcript) {
+                  sendTranscriptEvent(callId, {
+                    type: 'message',
+                    role: 'user',
+                    content: ev.transcript,
+                    metadata: { source: 'sip_call' }
+                  });
+                }
               } else if (ev?.type === 'response.audio_transcript.done') {
                 console.log('[openai-webhook] TTS Completed:', ev?.transcript || 'no transcript');
                 
+                // Send transcript event for assistant speech
+                if (ev?.transcript) {
+                  sendTranscriptEvent(callId, {
+                    type: 'message',
+                    role: 'assistant',
+                    content: ev.transcript,
+                    metadata: { source: 'sip_call' }
+                  });
+                }
+                
                 // Check if we should hangup after this TTS completion
-                console.log('[openai-webhook] Checking for pending hangup. Global state:', global.pendingHangup);
-                if (global.pendingHangup && global.pendingHangup.callId === callId) {
+                console.log('[openai-webhook] Checking for pending hangup. Global state:', (global as any).pendingHangup);
+                if ((global as any).pendingHangup && (global as any).pendingHangup.callId === callId) {
                   console.log('[openai-webhook] TTS completed, scheduling hangup...');
                   setTimeout(async () => {
                     console.log('[openai-webhook] Grace period completed, hanging up now');
@@ -721,7 +871,7 @@ export async function POST(req: Request): Promise<Response> {
                       }
                       
                       ws.close(1000, 'Reservation completed');
-                      global.pendingHangup = null;
+                      (global as any).pendingHangup = null;
                     } catch (e) {
                       console.log('[openai-webhook] Hangup error:', e);
                       try {
@@ -729,7 +879,7 @@ export async function POST(req: Request): Promise<Response> {
                       } catch (e2) {
                         console.log('[openai-webhook] WebSocket already closed');
                       }
-                      global.pendingHangup = null;
+                      (global as any).pendingHangup = null;
                     }
                   }, 3000); // 3 second grace period for complete speech
                 } else {
@@ -738,7 +888,8 @@ export async function POST(req: Request): Promise<Response> {
               } else if (ev?.type === 'response.function_call_arguments.done') {
                 console.log('[openai-webhook] Function call:', ev?.name, ev?.arguments);
                 console.log('[openai-webhook] Full function call event:', JSON.stringify(ev, null, 2));
-                // Handle MCP tool execution for SIP calls
+                
+                // Handle manual tool execution
                 if (ev?.name === 's6792596_fancita_rezervation_supabase') {
                   console.log('[openai-webhook] Calling handleReservationTool...');
                   handleReservationTool(ws, ev?.call_id, ev?.arguments, callerPhone, callId);
@@ -758,6 +909,13 @@ export async function POST(req: Request): Promise<Response> {
               }
             } catch {}
           });
+          ws.on('close', () => {
+            console.log('[openai-webhook] ws closed for', callId);
+            
+            // Send session end event
+            endTranscriptSession(callId);
+          });
+          
           ws.on('error', (e) => console.warn('[openai-webhook] ws error', e));
           // Pustimo odprto; strežnik lahko sam zaključi sejo po koncu klica
         } catch (err) {
