@@ -1,13 +1,31 @@
 // TwiML endpoint: preusmeri klic na OpenAI SIP preko Twilio SIP Domain
 
 function buildTwiML(projectId: string): string {
-  const sipTarget = `sip:${projectId}@sip.api.openai.com;transport=tls`;
-  return `<?xml version="1.0" encoding="UTF-8"?>
+  const useAgentsSDK = process.env.USE_AGENTS_SDK === 'true';
+  const forceAgentsSDK = false; // Keep native SIP Realtime
+  
+  if (useAgentsSDK || forceAgentsSDK) {
+    // Option A: Use Agents SDK bridge (Media Streams + WebSocket)
+    const bridgeUrl = process.env.TWILIO_BRIDGE_URL || 'ws://localhost:3001';
+    
+    console.log('[twiml-openai] Routing to Agents SDK bridge due to SIP WebSocket issues');
+    
+    return `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Connect>
+    <Stream url="${bridgeUrl}" />
+  </Connect>
+</Response>`;
+  } else {
+    // Option B: Direct OpenAI SIP (current approach)
+    const sipTarget = `sip:${projectId}@sip.api.openai.com;transport=tls`;
+    return `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Dial codecPolicy="restrictive" secure="true">
     <Sip codecPolicy="PCMU,PCMA" secure="true">${sipTarget}</Sip>
   </Dial>
 </Response>`;
+  }
 }
 
 export async function POST(req: Request): Promise<Response> {

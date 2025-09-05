@@ -18,6 +18,8 @@ import type { RealtimeAgent } from '@openai/agents/realtime';
 import { useTranscript } from "@/app/contexts/TranscriptContext";
 import { useEvent } from "@/app/contexts/EventContext";
 import { useRealtimeSession } from "./hooks/useRealtimeSession";
+import { useTranscriptBridge } from "./hooks/useTranscriptBridge";
+import { TranscriptViewer } from "./components/TranscriptViewer";
 import { createModerationGuardrail } from "@/app/agentConfigs/guardrails";
 
 // Agent configs
@@ -27,16 +29,36 @@ import { chatSupervisorScenario } from "@/app/agentConfigs/chatSupervisor";
 import { customerServiceRetailCompanyName } from "@/app/agentConfigs/customerServiceRetail";
 import { chatSupervisorCompanyName } from "@/app/agentConfigs/chatSupervisor";
 import { simpleHandoffScenario } from "@/app/agentConfigs/simpleHandoff";
-import { restoranScenario } from "@/app/agentConfigs/restoran";
 import { restoranCompanyName } from "@/app/agentConfigs/restoran";
+import { greeterAgent } from "@/app/agentConfigs/restoran/greeter";
+import { reservationAgent } from "@/app/agentConfigs/restoran/reservation";
+import { orderAgent } from "@/app/agentConfigs/restoran/order";
+import { handoffAgent } from "@/app/agentConfigs/restoran/handoff";
+import { unifiedRestoranAgent } from "@/app/agentConfigs/restoran/unified";
+
+// Dynamic scenario for restaurant based on multi-agent mode
+const getRestoranScenario = (multiAgent: boolean): RealtimeAgent[] => {
+  if (multiAgent) {
+    // Multi-agent scenario with handoffs
+    greeterAgent.handoffs = [reservationAgent, orderAgent, handoffAgent];
+    reservationAgent.handoffs = [greeterAgent, orderAgent, handoffAgent];
+    orderAgent.handoffs = [greeterAgent, reservationAgent, handoffAgent];
+    handoffAgent.handoffs = [greeterAgent, reservationAgent, orderAgent];
+    
+    return [greeterAgent, reservationAgent, orderAgent, handoffAgent];
+  } else {
+    // Single unified agent
+    return [unifiedRestoranAgent];
+  }
+};
 
 // Map used by connect logic for scenarios defined via the SDK.
-const sdkScenarioMap: Record<string, RealtimeAgent[]> = {
+const getSdkScenarioMap = (multiAgent: boolean): Record<string, RealtimeAgent[]> => ({
   simpleHandoff: simpleHandoffScenario,
   customerServiceRetail: customerServiceRetailScenario,
   chatSupervisor: chatSupervisorScenario,
-  restoran: restoranScenario,
-};
+  restoran: getRestoranScenario(multiAgent),
+});
 
 import useAudioDownload from "./hooks/useAudioDownload";
 import { useHandleSessionHistory } from "./hooks/useHandleSessionHistory";
@@ -69,6 +91,9 @@ function App() {
   const [selectedAgentConfigSet, setSelectedAgentConfigSet] = useState<
     RealtimeAgent[] | null
   >(null);
+  const [isMultiAgentMode, setIsMultiAgentMode] = useState<boolean>(
+    searchParams.get("multiAgent") === "true"
+  );
 
   const audioElementRef = useRef<HTMLAudioElement | null>(null);
   // Ref to identify whether the latest agent switch came from an automatic handoff
@@ -125,6 +150,14 @@ function App() {
   const { startRecording, stopRecording, downloadRecording } =
     useAudioDownload();
 
+  // Initialize transcript bridge for realtime SIP transcript sharing
+  const { 
+    isConnected: isBridgeConnected, 
+    subscribe: subscribeToTranscript,
+    activeSipSessions,
+    subscribedSessions
+  } = useTranscriptBridge();
+
   const sendClientEvent = (eventObj: any, eventNameSuffix = "") => {
     try {
       sendEvent(eventObj);
@@ -146,18 +179,21 @@ function App() {
       return;
     }
 
-    const agents = allAgentSets[finalAgentConfig];
+    // Use dynamic scenario map for restaurant, static for others
+    const sdkScenarioMap = getSdkScenarioMap(isMultiAgentMode);
+    const agents = sdkScenarioMap[finalAgentConfig] || allAgentSets[finalAgentConfig];
     const agentKeyToUse = agents[0]?.name || "";
 
     setSelectedAgentName(agentKeyToUse);
     setSelectedAgentConfigSet(agents);
-  }, [searchParams]);
+  }, [searchParams, isMultiAgentMode]);
 
-  useEffect(() => {
-    if (selectedAgentName && sessionStatus === "DISCONNECTED") {
-      connectToRealtime();
-    }
-  }, [selectedAgentName]);
+  // Removed auto-connect on agent selection - user must manually click Connect
+  // useEffect(() => {
+  //   if (selectedAgentName && sessionStatus === "DISCONNECTED") {
+  //     connectToRealtime();
+  //   }
+  // }, [selectedAgentName]);
 
   useEffect(() => {
     if (
@@ -199,6 +235,7 @@ function App() {
 
   const connectToRealtime = async () => {
     const agentSetKey = searchParams.get("agentConfig") || "default";
+    const sdkScenarioMap = getSdkScenarioMap(isMultiAgentMode);
     if (sdkScenarioMap[agentSetKey]) {
       if (sessionStatus !== "DISCONNECTED") return;
       setSessionStatus("CONNECTING");
@@ -345,7 +382,25 @@ function App() {
     // execution works correctly.
     disconnectFromRealtime();
     setSelectedAgentName(newAgentName);
-    // connectToRealtime will be triggered by effect watching selectedAgentName
+    // User must manually click Connect to reconnect
+  };
+
+  const handleMultiAgentToggle = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const newMultiAgentMode = e.target.checked;
+    setIsMultiAgentMode(newMultiAgentMode);
+    
+    // Update URL to reflect the change
+    const url = new URL(window.location.toString());
+    if (newMultiAgentMode) {
+      url.searchParams.set("multiAgent", "true");
+    } else {
+      url.searchParams.delete("multiAgent");
+    }
+    window.history.replaceState({}, '', url.toString());
+    
+    // Disconnect and reconnect to switch agent architecture
+    disconnectFromRealtime();
+    // User must manually click Connect to reconnect
   };
 
   // Because we need a new connection, refresh the page when codec changes
@@ -517,6 +572,56 @@ function App() {
               </div>
             </div>
           )}
+
+          {agentSetKey === 'restoran' && (
+            <div className="flex items-center ml-6">
+              <label className="flex items-center text-base gap-1 mr-2 font-medium">
+                <input
+                  type="checkbox"
+                  checked={isMultiAgentMode}
+                  onChange={handleMultiAgentToggle}
+                  className="mr-1"
+                />
+                Multi-Agent Mode
+              </label>
+            </div>
+          )}
+
+          <div className="flex items-center ml-6">
+            <div className="flex items-center text-sm gap-1">
+              <div className={`w-2 h-2 rounded-full ${isBridgeConnected ? 'bg-green-500' : 'bg-red-500'}`}></div>
+              <span className="text-gray-600">
+                SIP Bridge {isBridgeConnected ? 'Connected' : 'Disconnected'}
+              </span>
+              
+              {/* Show active SIP sessions */}
+              {isBridgeConnected && activeSipSessions.length > 0 && (
+                <div className="ml-3 flex items-center gap-2">
+                  <span className="text-xs text-green-600 font-medium">
+                    📞 {activeSipSessions.length} Active Call{activeSipSessions.length > 1 ? 's' : ''}
+                  </span>
+                  <div className="text-xs text-gray-500">
+                    ({subscribedSessions.length} monitored)
+                  </div>
+                </div>
+              )}
+              
+              {/* Manual subscription (backup) */}
+              {isBridgeConnected && activeSipSessions.length === 0 && (
+                <button
+                  onClick={() => {
+                    const callId = prompt('Enter SIP Call ID to monitor:');
+                    if (callId) {
+                      subscribeToTranscript(callId);
+                    }
+                  }}
+                  className="ml-2 px-2 py-1 text-xs bg-blue-500 text-white rounded hover:bg-blue-600"
+                >
+                  Monitor SIP Call
+                </button>
+              )}
+            </div>
+          </div>
         </div>
       </div>
 
@@ -549,6 +654,9 @@ function App() {
         codec={urlCodec}
         onCodecChange={handleCodecChange}
       />
+      
+      {/* SIP Transcript Viewer */}
+      <TranscriptViewer />
     </div>
   );
 }
