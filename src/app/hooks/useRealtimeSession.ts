@@ -6,6 +6,7 @@ import {
 } from '@openai/agents/realtime';
 
 import { audioFormatForCodec, applyCodecPreferences } from '../lib/codecUtils';
+import { GPT_REALTIME_MODEL } from '../lib/envSetup';
 import { useEvent } from '../contexts/EventContext';
 import { useHandleSessionHistory } from './useHandleSessionHistory';
 import { SessionStatus } from '../types';
@@ -137,12 +138,13 @@ export function useRealtimeSession(callbacks: RealtimeSessionCallbacks = {}) {
             return pc;
           },
         }),
-        model: 'gpt-4o-realtime-preview-2025-06-03',
+        model: GPT_REALTIME_MODEL,
         config: {
           inputAudioFormat: audioFormat,
           outputAudioFormat: audioFormat,
           inputAudioTranscription: {
             model: 'gpt-4o-mini-transcribe',
+            language: 'hr',
           },
         },
         outputGuardrails: outputGuardrails ?? [],

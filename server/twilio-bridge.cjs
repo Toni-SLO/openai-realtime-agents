@@ -1,10 +1,11 @@
 require('dotenv').config();
 const WebSocket = require('ws');
 const http = require('http');
+const { FANCITA_UNIFIED_INSTRUCTIONS, replaceInstructionVariables } = require('./shared-instructions.cjs');
 
 const PORT = parseInt(process.env.BRIDGE_PORT || '3001', 10);
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
-const OPENAI_REALTIME_MODEL = process.env.OPENAI_REALTIME_MODEL || 'gpt-4o-realtime-preview-2025-06-03';
+const OPENAI_REALTIME_MODEL = process.env.OPENAI_REALTIME_MODEL || 'gpt-realtime';
 const OPENAI_VOICE = process.env.OPENAI_REALTIME_VOICE || 'marin';
 
 const server = http.createServer();
@@ -37,21 +38,26 @@ function connectOpenAIForStream(streamSid, g711Format) {
         input_audio_format: g711Format,
         output_audio_format: g711Format,
         turn_detection: { type: 'server_vad', threshold: 0.5, prefix_padding_ms: 300, silence_duration_ms: 600 },
-        input_audio_transcription: { model: 'gpt-4o-mini-transcribe' },
+        input_audio_transcription: { model: 'gpt-4o-mini-transcribe', language: 'hr' }, // TODO: Add dynamic language detection
       },
     };
     oa.send(JSON.stringify(sessionUpdate));
-    // Predvajaj takojšen pozdrav greeterja (brez dodatnih navodil)
+    // Use shared instructions from centralized file
     try {
+      const sharedInstructions = FANCITA_UNIFIED_INSTRUCTIONS();
+      const finalInstructions = replaceInstructionVariables(sharedInstructions, 'twilio-bridge', streamSid);
+      
       oa.send(
         JSON.stringify({
           type: 'response.create',
           response: {
-            instructions: 'Restoran Fančita, Maja kod telefona. Kako vam mogu pomoći?',
+            instructions: finalInstructions,
           },
         })
       );
-    } catch {}
+    } catch (error) {
+      console.error('[bridge] Error loading shared instructions:', error);
+    }
     const st = streamIdToState.get(streamSid);
     if (st) st.openaiReady = true;
     console.log('[bridge] OpenAI realtime connected for', streamSid);

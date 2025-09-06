@@ -124,6 +124,7 @@ export function TranscriptViewer() {
       case 'tool_call': return '🔧';
       case 'tool_result': return '📊';
       case 'function_call': return '⚙️';
+      case 'language_change': return '🌍';
       default: return '📝';
     }
   };
@@ -270,7 +271,7 @@ export function TranscriptViewer() {
                       )}
 
                       {/* Show metadata for tool events and session events */}
-                      {event.metadata && (event.type === 'tool_call' || event.type === 'tool_result' || event.type === 'session_start') && (
+                      {event.metadata && (event.type === 'tool_call' || event.type === 'tool_result' || event.type === 'session_start' || event.type === 'language_change') && (
                         <div className="mt-2 text-xs bg-blue-50 p-2 rounded border-l-2 border-blue-200">
                           <div className="font-semibold text-blue-700 mb-1">📋 Metadata:</div>
                           <pre className="text-blue-600 font-mono">
