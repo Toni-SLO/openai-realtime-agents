@@ -513,6 +513,12 @@ function App() {
           </div>
         </div>
         <div className="flex items-center">
+          <a
+            href="/instructions"
+            className="mr-4 px-3 py-1 text-sm bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors"
+          >
+            ⚙️ Uredi instrukcije
+          </a>
           <label className="flex items-center text-base gap-1 mr-2 font-medium">
             Scenario
           </label>
