@@ -5,15 +5,21 @@ import http from 'http';
 import WebSocket from 'ws';  // Native ws should work fine in pure Node.js
 import fs from 'fs';
 import path from 'path';
+import { createRequire } from 'module';
+
+// Import CommonJS shared instructions
+const require = createRequire(import.meta.url);
+const { FANCITA_UNIFIED_INSTRUCTIONS, replaceInstructionVariables: sharedReplaceVariables } = require('./shared-instructions.cjs');
 
 const PORT = parseInt(process.env.SIP_WEBHOOK_PORT || '3003', 10);
 
 // Constants
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const OPENAI_PROJECT_ID = process.env.OPENAI_PROJECT_ID;
-const MODEL = 'gpt-4o-realtime-preview-2025-06-03';
+const MODEL = process.env.OPENAI_REALTIME_MODEL || 'gpt-realtime';
 const VOICE = 'marin';
-const SIP_CODEC = 'g711_ulaw';
+// Use G.711 μ-law for guaranteed SIP compatibility
+const SIP_CODEC = process.env.SIP_AUDIO_CODEC || 'g711_ulaw';
 
 // Deduplicate accepts per call_id within this process
 const acceptedCallIds = new Set();
@@ -21,12 +27,134 @@ const acceptedCallIds = new Set();
 // Track calls that should hangup after final message
 const pendingHangups = new Map();
 
-// Helper function to replace instruction variables
-function replaceInstructionVariables(instructions, callerId, conversationId) {
-  return instructions
-    .replace(/\{\{system__caller_id\}\}/g, callerId)
-    .replace(/\{\{system__conversation_id\}\}/g, conversationId);
+// Track detected language per call for dynamic transcription
+const callLanguages = new Map(); // callId -> language code (hr, sl, en, de, it, nl)
+
+// Track pending tool results to prevent premature hangup
+const pendingToolResults = new Map(); // callId -> Set of pending tool call IDs
+
+// Function to update transcription language dynamically
+function updateTranscriptionLanguage(ws, callId, newLanguage) {
+  const validLanguages = ['hr', 'sl', 'en', 'de', 'it', 'nl'];
+  if (!validLanguages.includes(newLanguage)) return;
+  
+  const currentLang = callLanguages.get(callId);
+  if (currentLang === newLanguage) return; // No change needed
+  
+  callLanguages.set(callId, newLanguage);
+  console.log(`[sip-webhook] 🌍 Updating transcription language to: ${newLanguage} for call ${callId}`);
+  
+  // Log language change to transcript
+  logTranscriptEvent(callId, {
+    type: 'language_change',
+    content: `Jezik spremenjen iz "${currentLang || 'hr'}" v "${newLanguage}"`,
+    from_language: currentLang || 'hr',
+    to_language: newLanguage,
+    timestamp: new Date().toISOString(),
+    metadata: {
+      callId: callId,
+      previousLanguage: currentLang || 'hr',
+      newLanguage: newLanguage,
+      transcriptionModel: 'gpt-4o-mini-transcribe'
+    }
+  });
+  
+  // Update session with new language
+  ws.send(JSON.stringify({
+    type: 'session.update',
+    session: {
+      input_audio_transcription: {
+        model: 'gpt-4o-mini-transcribe',
+        language: newLanguage,
+      }
+    }
+  }));
 }
+
+// DISABLED: Language detection based on transcript is unreliable
+// Only agent (Maja) should decide language changes based on conversation context
+function detectUserLanguage_DISABLED(ws, callId, userTranscript) {
+  const text = userTranscript.toLowerCase();
+  
+  // Language detection patterns based on USER speech patterns
+  const userLanguagePatterns = {
+    'sl': [
+      'rezervirati mizo',
+      'za nocoj',
+      'dobro vecer',
+      'hvala lepa',
+      'dve osebi',
+      'tri osebe'
+    ],
+    'hr': [
+      'htio bih',
+      'htjela bih', 
+      'izabrati stol',
+      'rezervirati stol',
+      'za večeras',
+      'dobro veče',
+      'hvala vam',
+      'dvije osobe',
+      'tri osobe'
+    ],
+    'en': [
+      'restaurant fančita, maja speaking',
+      'how can i help you',
+      'would you like to make',
+      'for how many people',
+      'at what time',
+      'is that correct'
+    ],
+    'de': [
+      'restaurant fančita, maja am telefon',
+      'wie kann ich ihnen helfen',
+      'möchten sie einen tisch',
+      'für wie viele personen',
+      'um welche uhrzeit',
+      'ist das korrekt'
+    ],
+    'it': [
+      'ristorante fančita, maja al telefono',
+      'come posso aiutarla',
+      'vuole prenotare un tavolo',
+      'per quante persone',
+      'a che ora',
+      'è corretto'
+    ],
+    'nl': [
+      'restaurant fančita, maja aan de telefoon',
+      'hoe kan ik u helpen',
+      'wilt u een tafel reserveren',
+      'voor hoeveel personen',
+      'hoe laat',
+      'is dat correct'
+    ],
+    'hr': [
+      'restoran fančita, maja kod telefona',
+      'kako vam mogu pomoći',
+      'želite li rezervirati',
+      'za koliko osoba',
+      'u koje vrijeme',
+      'je li točno'
+    ]
+  };
+  
+  // Check for language patterns
+  for (const [lang, patterns] of Object.entries(languagePatterns)) {
+    const matchedPattern = patterns.find(pattern => text.includes(pattern));
+    if (matchedPattern) {
+      console.log(`[sip-webhook] 🔍 Language detected: ${lang} (matched: "${matchedPattern}")`);
+      updateTranscriptionLanguage(ws, callId, lang);
+      return;
+    }
+  }
+  
+  // Log if no language pattern matched
+  console.log(`[sip-webhook] 🤷 No language pattern matched for: "${text.substring(0, 100)}..."`);
+}
+
+// Use shared function for replacing instruction variables
+// (imported as sharedReplaceVariables from shared-instructions.cjs)
 
 // File-based transcript logging
 function logTranscriptEvent(sessionId, event) {
@@ -47,89 +175,7 @@ function logTranscriptEvent(sessionId, event) {
   }
 }
 
-// Unified instructions
-const FANCITA_UNIFIED_INSTRUCTIONS = `
-# Fančita Restaurant Agent
-
-## 0) System & constants
-- tel vedno = {{system__caller_id}}
-- source_id vedno = {{system__conversation_id}}
-- Privzeta lokacija rezervacije: terasa
-- Kratki odgovori, brez ponavljanja po vsakem stavku; enkratna potrditev na koncu.
-
-## 1) Jezik - AVTOMATSKA DETEKCIJA
-- **TAKOJ** po prvem user response ZAZNI jezik in preklopi nanj.
-- Če user govori angleško → TAKOJ odgovori angleško (Hello, Restaurant Fančita, Maja speaking. How can I help you?)
-- Če user govori slovensko → TAKOJ odgovori slovensko (Restavracija Fančita, tukaj Maja. Kako vam lahko pomagam?)
-- Če user govori hrvaško → odgovori hrvaško (kot običajno)
-- **NIKOLI** ne ostajaj v hrvaškem če user jasno govori drugače.
-
-## 2) Osebnost in stil
-- Ti si Maja, prijazna in učinkovita asistentka restavracije Fančita v Vrsarju.
-- Vikanje, topel ton, kratke jasne povedi.
-
-## 3) Pozdrav in prepoznavanje namena
-- **Prvi response mora biti**: "Restoran Fančita, Maja kod telefona. Kako vam mogu pomoći?"
-- Če klicatelj želi rezervirati mizo → RESERVATION
-- Če želi naročiti hrano/pijačo → ORDER
-- Če želi govoriti z osebjem → HANDOFF
-
-## 4) Tok: RESERVATION
-Vprašaj samo za manjkajoče podatke v tem vrstnem redu:
-1. guests_number – "Za koliko oseba?"
-2. date – "Za koji datum?"
-3. time – "U koje vrijeme?"
-4. name – vedno vprašaj: "Na koje ime?"
-5. notes – "Imate li posebnih želja (alergije, lokacija, rođendan)?"
-
-**Potrditev (enkrat):**
-"Razumem: [date], [time], [guests_number] osoba, ime [name], lokacija [location]. Je li točno?"
-
-- Če potrdi → **TAKOJ kliči tool s6792596_fancita_rezervation_supabase**
-- Po uspehu: "Rezervacija je zavedena. Vidimo se u Fančiti."
-
-## 5) Tok: ORDER
-Vprašaj samo za manjkajoče podatke v tem vrstnem redu:
-1. delivery_type – vedno **najprej potrdi** ali gre za dostavo ali prevzem.
-   - Če uporabnik reče *delivery* → takoj vprašaj za delivery_address.
-   - Če *pickup* → delivery_address = "-".
-2. items – "Recite narudžbu (jelo i količina)."
-3. date – datum dostave/prevzema  
-4. delivery_time – čas dostave v HH:MM
-5. name – ime za naročilo
-6. notes – posebne želje
-
-**Potrditev (enkrat, vedno z zneskom):**
-"Razumijem narudžbu: [kratko naštej], [delivery_type], [date] u [delivery_time], ime [name], ukupno [total] €. Je li točno?"
-
-- Če potrdi → **TAKOJ kliči tool s6798488_fancita_order_supabase**
-- Po uspehu: "Narudžba je zaprimljena. Hvala vam!"
-
-## 6) Tok: HANDOFF
-**VEDNO ko gost želi govoriti z osebjem:**
-1. **POVZEMI PROBLEM** - "Razumem da imate problem z [kratko opiši]"
-2. **POKLIČI OSEBJE** - Uporabi tool transfer_to_staff  
-3. **SPOROČI OSEBJU** - "Zdravo, imam gosta na liniji z naslednjim problemom: [povzemi]. Lahko ga povežem?"
-4. **POVEŽI GOSTA** - "Povezujem vas z našim osebjem. Trenutak prosim."
-
-## 7) Validacije
-- location ∈ {vrt, terasa, unutra} (male črke)
-- guests_number ≥ 1
-- date v formatu YYYY-MM-DD
-- time v formatu HH:MM (24h)
-- name ni prazno
-
-## 8) KLJUČNO: MCP Orkestracija
-- **Po potrditvi podatkov** vedno **takoj** pokliči ustrezni MCP tool
-- **Nikoli** ne izreci potrditve pred uspešnim rezultatom tool-a
-- Če tool vrne napako → "Oprostite, imam tehničku poteškuću. Pokušavam još jednom."
-
-## 9) Časovne pretvorbe
-- "danas" → današnji datum
-- "sutra" / "jutri" → današnji datum + 1
-- "šest ujutro" → 06:00
-- "šest popodne" / "šest zvečer" → 18:00
-`;
+// Unified instructions are now loaded from shared file
 
 // Tool definitions
 const FANCITA_RESERVATION_TOOL = {
@@ -200,6 +246,22 @@ const FANCITA_HANDOFF_TOOL = {
   }
 };
 
+const FANCITA_HANGUP_TOOL = {
+  type: 'function',
+  name: 'end_call',
+  description: 'End the phone call when conversation is naturally completed',
+  parameters: {
+    type: 'object',
+    properties: {
+      reason: { 
+        type: 'string', 
+        description: 'Reason for ending call (e.g., "reservation_completed", "order_completed", "goodbye_exchanged")' 
+      }
+    },
+    required: ['reason']
+  }
+};
+
 // HTTP server for webhook
 const server = http.createServer(async (req, res) => {
   if (req.method !== 'POST' || req.url !== '/webhook') {
@@ -243,7 +305,12 @@ const server = http.createServer(async (req, res) => {
 
       // Accept the call
       const acceptUrl = `https://api.openai.com/v1/realtime/calls/${encodeURIComponent(callId)}/accept`;
-      const instructions = replaceInstructionVariables(FANCITA_UNIFIED_INSTRUCTIONS, callerFrom, callId);
+      const sharedInstructions = FANCITA_UNIFIED_INSTRUCTIONS();
+      const instructions = sharedReplaceVariables(sharedInstructions, callerFrom, callId);
+      
+      // Debug: Check if instructions contain Croatian greeting
+      const hasCroatianGreeting = instructions.includes('Restoran Fančita, Maja kod telefona');
+      console.log(`[sip-webhook] 🔍 Instructions loaded: ${instructions.length} chars, Croatian greeting: ${hasCroatianGreeting}`);
 
       const acceptPayload = {
         type: 'realtime',
@@ -252,8 +319,15 @@ const server = http.createServer(async (req, res) => {
         voice: VOICE,
         modalities: ['text', 'audio'],
         audio: {
-          input: { format: SIP_CODEC, sample_rate: 8000 },
-          output: { voice: VOICE, format: SIP_CODEC, sample_rate: 8000 }
+          input: { 
+            format: SIP_CODEC, 
+            sample_rate: SIP_CODEC === 'pcm16' ? 8000 : 8000  // Use 8kHz for SIP compatibility
+          },
+          output: { 
+            voice: VOICE, 
+            format: SIP_CODEC, 
+            sample_rate: SIP_CODEC === 'pcm16' ? 8000 : 8000  // Use 8kHz for SIP compatibility
+          }
         },
         turn_detection: { type: 'server_vad', threshold: 0.5 }
       };
@@ -279,6 +353,7 @@ const server = http.createServer(async (req, res) => {
       }
 
       acceptedCallIds.add(callId);
+      callLanguages.set(callId, 'hr'); // Initialize with Croatian
       console.log('[sip-webhook] ✅ Call accepted:', callId);
 
       // Connect to WebSocket - THIS SHOULD WORK IN PURE NODE.JS
@@ -294,55 +369,59 @@ const server = http.createServer(async (req, res) => {
       ws.on('open', () => {
         console.log('[sip-webhook] 🔗 WebSocket connected for', callId);
         
+        // Initialize language tracking to Croatian
+        callLanguages.set(callId, 'hr');
+        
         // Log session start with enhanced metadata
         const startTime = new Date();
+        const initialLanguage = 'hr';
+        
         logTranscriptEvent(callId, {
           type: 'session_start',
           sessionId: callId,
-          content: `📞 Klic iz: ${callerPhone} | 📅 ${startTime.toLocaleDateString('sl-SI')} ${startTime.toLocaleTimeString('sl-SI')}`,
+          content: `📞 Klic iz: ${callerPhone} | 📅 ${startTime.toLocaleDateString('sl-SI')} ${startTime.toLocaleTimeString('sl-SI')} | 🌍 Jezik: ${initialLanguage}`,
           metadata: { 
             callerPhone,
             startTime: startTime.toISOString(),
             startTimeFormatted: `${startTime.toLocaleDateString('sl-SI')} ${startTime.toLocaleTimeString('sl-SI')}`,
             model: MODEL,
             voice: VOICE,
-            codec: SIP_CODEC
+            codec: SIP_CODEC,
+            initialLanguage: initialLanguage,
+            transcriptionModel: 'gpt-4o-mini-transcribe'
           }
         });
 
         // Configure session
-        const tools = [FANCITA_RESERVATION_TOOL, FANCITA_ORDER_TOOL, FANCITA_HANDOFF_TOOL];
+        const tools = [FANCITA_RESERVATION_TOOL, FANCITA_ORDER_TOOL, FANCITA_HANDOFF_TOOL, FANCITA_HANGUP_TOOL];
         
         ws.send(JSON.stringify({
           type: 'session.update',
           session: {
             input_audio_format: SIP_CODEC,
             output_audio_format: SIP_CODEC,
+            input_audio_transcription: {
+              model: 'gpt-4o-mini-transcribe',
+              language: 'hr',  // Initial default, will be updated dynamically
+            },
             voice: VOICE,
             instructions: instructions,
             turn_detection: { type: 'server_vad', threshold: 0.5 },
-            input_audio_transcription: { model: 'whisper-1' },
             tools: tools,
             tool_choice: 'auto',
-            temperature: 0.8,
+            temperature: 0.6,
           }
         }));
 
         console.log('[sip-webhook] ⚙️ Session configured');
 
-        // Trigger initial greeting
+        // Trigger initial response (let instructions handle greeting)
         setTimeout(() => {
           ws.send(JSON.stringify({
-            type: 'conversation.item.create',
-            item: {
-              type: 'message',
-              role: 'user',
-              content: [{ type: 'input_text', text: '*klic se vzpostavlja*' }]
-            }
+            type: 'response.create'
           }));
           
-          ws.send(JSON.stringify({ type: 'response.create' }));
-          console.log('[sip-webhook] 🎤 Initial greeting triggered');
+          console.log('[sip-webhook] 🎤 Initial response triggered');
         }, 100);
       });
 
@@ -363,43 +442,63 @@ const server = http.createServer(async (req, res) => {
 
           // Log transcript events - Enhanced logging
           if (message.type === 'conversation.item.input_audio_transcription.completed') {
-            // User speech completed - THIS IS THE REAL USER MESSAGE
+            // User speech completed - log only once with metadata
+            console.log('[sip-webhook] 🔄 User transcript received:', message.transcript);
+            
             logTranscriptEvent(callId, {
               type: 'message',
               role: 'user',
               content: message.transcript,
-              timestamp: new Date().toISOString()
+              timestamp: new Date().toISOString(),
+              metadata: {
+                currentLanguage: callLanguages.get(callId) || 'hr',
+                transcriptionModel: 'gpt-4o-mini-transcribe',
+                transcriptionComplete: true
+              }
             });
-            
-            // Log user transcript - system will handle it automatically
-            console.log('[sip-webhook] 🔄 User transcript received:', message.transcript);
             
           } else if (message.type === 'conversation.item.created' && message.item?.type === 'message' && message.item?.role === 'user') {
             // Skip logging here - we'll log only when transcription is completed
             console.log('[sip-webhook] 🎤 User audio received, waiting for transcription...');
           } else if (message.type === 'response.audio_transcript.done') {
             // Assistant speech completed
+            const transcript = message.transcript || '';
+            
+            // Do NOT detect language from assistant responses - only from user input
+            
             logTranscriptEvent(callId, {
               type: 'message',
               role: 'assistant', 
-              content: message.transcript,
-              timestamp: new Date().toISOString()
+              content: transcript,
+              timestamp: new Date().toISOString(),
+              metadata: {
+                currentLanguage: callLanguages.get(callId) || 'hr',
+                transcriptionModel: 'gpt-4o-mini-transcribe'
+              }
             });
           } else if (message.type === 'response.function_call_arguments.done') {
-            // Tool call completed
+            // Tool call completed - track it as pending
             const parsedArgs = JSON.parse(message.arguments || '{}');
+            
+            // Track this tool call as pending
+            if (!pendingToolResults.has(callId)) {
+              pendingToolResults.set(callId, new Set());
+            }
+            pendingToolResults.get(callId).add(message.call_id);
+            console.log(`[sip-webhook] 🔧 Tool call ${message.call_id} started, tracking as pending`);
+            
             logTranscriptEvent(callId, {
               type: 'tool_call',
               tool_name: message.name,
-              arguments: JSON.stringify(parsedArgs, null, 2),
+              arguments: parsedArgs,  // ← ACTUAL VALUES, not JSON string
               call_id: message.call_id,
               timestamp: new Date().toISOString(),
-              // Add metadata similar to session_start
               metadata: {
                 toolName: message.name,
                 callId: message.call_id,
                 argumentCount: Object.keys(parsedArgs).length,
-                argumentKeys: Object.keys(parsedArgs)
+                argumentKeys: Object.keys(parsedArgs),
+                fullArguments: parsedArgs  // ← FULL DATA for debugging
               }
             });
           } else if (message.type === 'conversation.item.created' && message.item?.type === 'function_call_output') {
@@ -411,18 +510,29 @@ const server = http.createServer(async (req, res) => {
             logTranscriptEvent(callId, {
               type: 'tool_result',
               tool_call_id: message.item.call_id,
-              result: JSON.stringify(parsedOutput, null, 2),
+              result: parsedOutput,  // ← ACTUAL RESULT OBJECT, not JSON string
               timestamp: new Date().toISOString(),
-              // Add metadata based on parsed output
               metadata: {
                 callId: message.item.call_id,
                 status: parsedOutput.success ? 'success' : 'error',
                 resultType: typeof parsedOutput,
                 hasData: !!(parsedOutput.data || parsedOutput.content),
+                fullResult: parsedOutput,  // ← FULL RESULT for debugging
                 mode: parsedOutput.mode || 'mcp',
                 mcpSuccess: parsedOutput.success === true
               }
             });
+            
+            // Tool result is already sent by handleToolCall function
+            // No need to send it again here to avoid conflicts
+            
+            // Mark this tool call as completed
+            if (pendingToolResults.has(callId)) {
+              pendingToolResults.get(callId).delete(message.item.call_id);
+              console.log(`[sip-webhook] ✅ Tool call ${message.item.call_id} completed, ${pendingToolResults.get(callId).size} remaining`);
+            }
+            
+            console.log(`[sip-webhook] 🔧 Tool result sent back to OpenAI for call ${message.item.call_id}`);
           } else if (message.type === 'error') {
             // Errors - include full error details
             console.warn('[sip-webhook] 🚨 OpenAI Error:', JSON.stringify(message.error || message, null, 2));
@@ -446,40 +556,8 @@ const server = http.createServer(async (req, res) => {
             handleToolCall(ws, message, callerPhone, callId);
           }
 
-          // Auto-hangup logic
-          if (message.type === 'response.audio_transcript.done') {
-            const transcript = message.transcript?.toLowerCase() || '';
-            
-            // Check for hangup phrases in different languages
-            const hangupPhrases = [
-              'hvala in prijetno uživanje', 'vidimo se', 'naročilo je zaznano',
-              'rezervacija je zavedena', 'hvala za poklic', 'nasvidenje',
-              'goodbye', 'see you', 'thank you for calling',
-              'reservation is confirmed', 'see you in fančita', 'thank you',
-              'vidimo se u fančiti', 'hvala vam', 'rezervacija je potvrđena',
-              'the reservation is confirmed', 'confirmed', 'all set',
-              'thank you and see you', 'have a great day'
-            ];
-            
-            if (hangupPhrases.some(phrase => transcript.includes(phrase))) {
-              // Check if hangup already scheduled
-              if (!pendingHangups.has(callId)) {
-                console.log('[sip-webhook] 📞 Detected hangup phrase, scheduling hangup');
-                pendingHangups.set(callId, Date.now());
-                
-                setTimeout(() => {
-                  if (pendingHangups.has(callId)) {
-                    console.log('[sip-webhook] 📞 Auto-hanging up after final message');
-                    
-                    // Close our WebSocket directly - no call.hangup in API
-                    ws.close(1000, 'Call completed');
-                    
-                    pendingHangups.delete(callId);
-                  }
-                }, 1500); // Reduced to 1.5 seconds
-              }
-            }
-          }
+          // Agent-controlled hangup - no more phrase detection
+          // Maja will use the end_call tool when conversation is complete
 
         } catch (error) {
           console.error('[sip-webhook] ❌ Message parse error:', error);
@@ -488,6 +566,12 @@ const server = http.createServer(async (req, res) => {
 
       ws.on('close', (code, reason) => {
         console.log('[sip-webhook] 🔚 WebSocket closed for', callId, 'Code:', code, 'Reason:', reason?.toString());
+        
+        // Cleanup tracking
+        callLanguages.delete(callId);
+        pendingToolResults.delete(callId);
+        pendingHangups.delete(callId);
+        
         logTranscriptEvent(callId, { 
           type: 'session_end', 
           sessionId: callId,
@@ -524,35 +608,7 @@ async function handleToolCall(ws, message, callerPhone, callId) {
   try {
     console.log('[sip-webhook] 🔧 Tool call:', message.name, message.arguments);
     
-    // First, let the user know we're processing
-    const toolName = message.name;
-    let processingMessage = '';
-    
-    if (toolName?.includes('rezervation')) {
-      processingMessage = 'Trenutak prosim, zapisujem rezervaciju...';
-    } else if (toolName?.includes('order')) {
-      processingMessage = 'Trenutak prosim, obrađujem narudžbu...';
-    } else {
-      processingMessage = 'Trenutak prosim, obrađujem zahtjev...';
-    }
-    
-    // Send processing message immediately
-    ws.send(JSON.stringify({
-      type: 'conversation.item.create',
-      item: {
-        type: 'message',
-        role: 'assistant',
-        content: [{
-          type: 'text',
-          text: processingMessage
-        }]
-      }
-    }));
-    
-    // Trigger immediate response for the processing message
-    ws.send(JSON.stringify({
-      type: 'response.create'
-    }));
+    // Execute tool call directly without processing message
 
     let result;
     if (message.name === 's6792596_fancita_rezervation_supabase' || message.name === 's6798488_fancita_order_supabase') {
@@ -567,14 +623,69 @@ async function handleToolCall(ws, message, callerPhone, callId) {
       });
 
       if (response.ok) {
-        result = await response.json();
-        console.log('[sip-webhook] ✅ MCP call successful:', result);
+        const mcpResponse = await response.json();
+        console.log('[sip-webhook] ✅ MCP call successful:', mcpResponse);
+        
+        // Extract the actual result from MCP API wrapper
+        if (mcpResponse.success && mcpResponse.data) {
+          result = mcpResponse.data; // Use the actual MCP result
+        } else {
+          result = mcpResponse; // Fallback to full response
+        }
       } else {
         result = { success: false, error: 'MCP call failed' };
       }
     } else if (message.name === 'transfer_to_staff') {
       // Simulate staff handoff
       result = { success: true, message: 'Transfer initiated' };
+    } else if (message.name === 'end_call') {
+      // Handle call termination - DO NOT send result back to avoid Maja saying it
+      const args = JSON.parse(message.arguments);
+      console.log(`[sip-webhook] 📞 Agent requested call end: ${args.reason}`);
+      
+      // Immediate hangup without sending tool result to Maja
+      console.log('[sip-webhook] 📞 Agent-initiated hangup (immediate)');
+      
+      try {
+        // Send hangup signal to OpenAI Realtime
+        ws.send(JSON.stringify({
+          type: 'session.update',
+          session: {
+            turn_detection: null // Disable turn detection to end call
+          }
+        }));
+        
+        // Try to hangup via OpenAI API
+        setTimeout(async () => {
+          try {
+            const hangupUrl = `https://api.openai.com/v1/realtime/calls/${encodeURIComponent(callId)}/hangup`;
+            const hangupResponse = await fetch(hangupUrl, {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
+                'Content-Type': 'application/json'
+              }
+            });
+            
+            if (hangupResponse.ok) {
+              console.log('[sip-webhook] ✅ SIP call hung up via API');
+            } else {
+              console.log('[sip-webhook] ⚠️ API hangup failed, closing WebSocket');
+              ws.close(1000, 'Agent ended call');
+            }
+          } catch (apiError) {
+            console.error('[sip-webhook] ❌ API hangup error:', apiError);
+            ws.close(1000, 'Agent ended call');
+          }
+        }, 4000); // Wait 3.2 seconds for Maja to finish speaking
+        
+      } catch (error) {
+        console.error('[sip-webhook] ❌ Agent hangup error:', error);
+        ws.close(1000, 'Agent ended call');
+      }
+      
+      // Return early - don't send tool result back to OpenAI
+      return;
     }
 
     // Send result back to OpenAI
@@ -583,11 +694,15 @@ async function handleToolCall(ws, message, callerPhone, callId) {
       item: {
         type: 'function_call_output',
         call_id: message.call_id,
-        output: result // Don't double-stringify, OpenAI expects the raw object
+        output: JSON.stringify(result) // Stringify for OpenAI Realtime API
       }
     }));
 
+    // Trigger response so Maja can react to the tool result
     ws.send(JSON.stringify({ type: 'response.create' }));
+    
+    console.log(`[sip-webhook] 🔧 Tool result sent for call ${message.call_id}:`, result);
+    console.log(`[sip-webhook] 🔧 Tool result type:`, typeof result, 'Success:', result?.success);
 
   } catch (error) {
     console.error('[sip-webhook] ❌ Tool call error:', error);

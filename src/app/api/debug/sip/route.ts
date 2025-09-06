@@ -4,7 +4,7 @@ import { NextRequest } from 'next/server';
 export async function GET(req: NextRequest): Promise<Response> {
   const projectId = process.env.OPENAI_PROJECT_ID || '';
   const apiKey = process.env.OPENAI_API_KEY || '';
-  const model = process.env.OPENAI_REALTIME_MODEL || 'gpt-4o-realtime-preview-2025-06-03';
+  const model = process.env.OPENAI_REALTIME_MODEL || 'gpt-realtime';
   const voice = process.env.OPENAI_REALTIME_VOICE || 'marin';
 
   const config = {

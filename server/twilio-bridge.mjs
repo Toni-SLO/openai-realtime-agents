@@ -9,7 +9,7 @@ const { unifiedRestoranAgent } = restoranPkg;
 
 const PORT = parseInt(process.env.BRIDGE_PORT || '3001', 10);
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
-const OPENAI_REALTIME_MODEL = process.env.OPENAI_REALTIME_MODEL || 'gpt-4o-realtime-preview-2025-06-03';
+const OPENAI_REALTIME_MODEL = process.env.OPENAI_REALTIME_MODEL || 'gpt-realtime';
 const OPENAI_VOICE = process.env.OPENAI_REALTIME_VOICE || 'marin';
 
 const server = http.createServer();
@@ -160,7 +160,7 @@ wss.on('connection', (ws, req) => {
             modalities: ['text', 'audio'],
             inputAudioFormat: g711Format,
             outputAudioFormat: g711Format,
-            inputAudioTranscription: { model: 'gpt-4o-mini-transcribe' },
+            inputAudioTranscription: { model: 'gpt-4o-mini-transcribe', language: 'hr' }, // TODO: Add dynamic language detection
             turnDetection: { type: 'semantic_vad' },
           },
         });
