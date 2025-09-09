@@ -1,15 +1,28 @@
 #!/usr/bin/env node
 
 import dotenv from 'dotenv';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import { dirname } from 'path';
+
+// Get the project root directory (one level up from server/)
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const projectRoot = path.resolve(__dirname, '..');
 
 // Load environment variables from .env.local first, then .env  
 // Use override: true to prioritize .env.local over system variables
-dotenv.config({ path: '.env.local', override: true });
-dotenv.config({ path: '.env' });
+const envLocalPath = path.join(projectRoot, '.env.local');
+const envPath = path.join(projectRoot, '.env');
+
+console.log(`[sip-webhook] 🔍 Loading .env.local from: ${envLocalPath}`);
+console.log(`[sip-webhook] 🔍 Loading .env from: ${envPath}`);
+
+dotenv.config({ path: envLocalPath, override: true });
+dotenv.config({ path: envPath });
 import http from 'http';
 import WebSocket from 'ws';  // Native ws should work fine in pure Node.js
 import fs from 'fs';
-import path from 'path';
 import { createRequire } from 'module';
 import nodemailer from 'nodemailer';
 
@@ -81,14 +94,16 @@ async function sendUrgentErrorEmail(errorType, errorDetails, callId, suggestions
 
 // Constants
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-const OPENAI_PROJECT_ID = process.env.OPENAI_PROJECT_ID || "proj_cJHC8zDMUe6YkFQYVikfFKVM";
+const OPENAI_PROJECT_ID = process.env.OPENAI_PROJECT_ID;
 const MODEL = process.env.GPT_REALTIME_MODEL || 'gpt-realtime';
 
 // Debug environment variables
 console.log('[sip-webhook] 🔧 Environment loaded:');
 console.log(`[sip-webhook] 🔑 API Key: ${OPENAI_API_KEY ? 'SET' : 'MISSING'}`);
 console.log(`[sip-webhook] 🏗️  Project ID: ${OPENAI_PROJECT_ID || 'MISSING'}`);
+console.log(`[sip-webhook] 🏗️  Project ID raw: ${process.env.OPENAI_PROJECT_ID || 'NOT_FOUND'}`);
 console.log(`[sip-webhook] 🤖 Model: ${MODEL}`);
+console.log(`[sip-webhook] 📧 Email: ${process.env.URGENT_ERROR_EMAIL || 'NOT_SET'}`);
 
 const VOICE = process.env.OPENAI_REALTIME_VOICE || 'marin';
 // Use G.711 μ-law for guaranteed SIP compatibility
@@ -476,8 +491,8 @@ const server = http.createServer(async (req, res) => {
         } catch (parseError) {
           console.log('[sip-webhook] ⚠️ Could not parse accept response JSON:', parseError.message);
         }
-        
-        if (!resAccept.ok) {
+
+      if (!resAccept.ok) {
           console.error('[sip-webhook] ❌ Accept failed:', resAccept.status, resAccept.statusText);
           console.error('[sip-webhook] ❌ Accept response:', responseText);
           res.writeHead(500);
@@ -497,7 +512,7 @@ const server = http.createServer(async (req, res) => {
 
       // Dodaj Authorization header v odgovor - pomembno za SIP integracijo
       res.writeHead(200, {
-        'Authorization': `Bearer ${OPENAI_API_KEY}`,
+          'Authorization': `Bearer ${OPENAI_API_KEY}`,
         'Content-Type': 'application/json'
       });
       res.end(JSON.stringify({ status: 'accepted', call_id: callId }));
@@ -546,9 +561,9 @@ async function processCall(callId, event, callerFrom, callerPhone) {
       response.on('end', () => {
         console.log(`\n[SIP-WEBHOOK] ❌❌❌ ERROR DETAILS: ${body} ❌❌❌\n`);
       });
-    });
+      });
 
-    ws.on('open', () => {
+      ws.on('open', () => {
         console.log('\n\n[SIP-WEBHOOK] ✅✅✅ WEBSOCKET CONNECTED:', callId, '✅✅✅\n');
         
         // Initialize language tracking to Croatian
@@ -593,12 +608,12 @@ async function processCall(callId, event, callerFrom, callerPhone) {
               },
               output: {
                 format: { type: 'audio/pcmu' },
-                voice: 'marin'
+                voice: VOICE
               }
             }
           }
         }));
-        
+
         console.log('[sip-webhook] 🎧 Audio format configured');
         
         // Takoj pošljemo response.create za začetni pozdrav
@@ -912,7 +927,7 @@ async function processCall(callId, event, callerFrom, callerPhone) {
           timestamp: new Date().toISOString()
         });
       });
-      
+
     } catch (error) {
       console.error('[sip-webhook] ❌ Process call error:', error);
     }
@@ -928,7 +943,12 @@ async function handleToolCall(ws, message, callerPhone, callId) {
     let result;
     if (message.name === 's6792596_fancita_rezervation_supabase' || message.name === 's6798488_fancita_order_supabase') {
       // Call MCP endpoint
-      const response = await fetch('http://localhost:3000/api/mcp', {
+      const mcpUrl = process.env.MCP_SERVER_URL;
+      if (!mcpUrl) {
+        throw new Error('MCP_SERVER_URL not configured in environment');
+      }
+      
+      const response = await fetch(mcpUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
