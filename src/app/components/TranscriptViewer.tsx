@@ -30,6 +30,7 @@ export function TranscriptViewer() {
   const [loading, setLoading] = useState(false);
   const [transcriptMetadata, setTranscriptMetadata] = useState<{[key: string]: any}>({});
   const [isVisible, setIsVisible] = useState(false);
+  const [liveTranscripts, setLiveTranscripts] = useState<{[sessionId: string]: TranscriptEvent[]}>({});
 
   const loadTranscripts = async () => {
     try {
@@ -101,6 +102,48 @@ export function TranscriptViewer() {
       setLoading(false);
     }
   };
+
+  // WebSocket connection for real-time transcript updates
+  useEffect(() => {
+    const ws = new WebSocket('ws://localhost:3002');
+    
+    ws.onopen = () => {
+      console.log('[TranscriptViewer] Connected to transcript bridge');
+    };
+    
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.type === 'transcript_event') {
+          const { sessionId, event: transcriptEvent } = data;
+          
+          setLiveTranscripts(prev => ({
+            ...prev,
+            [sessionId]: [...(prev[sessionId] || []), transcriptEvent]
+          }));
+          
+          // Refresh transcript list to show new sessions
+          if (isVisible) {
+            loadTranscripts();
+          }
+        }
+      } catch (error) {
+        console.error('[TranscriptViewer] Error processing message:', error);
+      }
+    };
+    
+    ws.onclose = () => {
+      console.log('[TranscriptViewer] Disconnected from transcript bridge');
+    };
+    
+    ws.onerror = (error) => {
+      console.error('[TranscriptViewer] WebSocket error:', error);
+    };
+    
+    return () => {
+      ws.close();
+    };
+  }, [isVisible]);
 
   useEffect(() => {
     if (isVisible) {

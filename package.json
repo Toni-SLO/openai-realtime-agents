@@ -1,17 +1,44 @@
 {
-  "name": "openai-sip-test",
+  "name": "fancita-realtime-agents",
   "version": "1.0.0",
-  "description": "Test script za OpenAI SIP integracijo",
-  "main": "test-openai-sip.mjs",
+  "private": true,
   "type": "module",
   "scripts": {
-    "test": "node test-openai-sip.mjs"
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "sip-webhook": "cd server && node sip-webhook.mjs",
+    "transcript-bridge": "cd server && node transcript-bridge.mjs",
+    "tunnel": "npx localtunnel --port 3003 --subdomain fancita-sip"
   },
   "dependencies": {
+    "@openai/agents": "^0.1.1",
+    "@radix-ui/react-icons": "^1.3.0",
+    "@tailwindcss/typography": "^0.5.0",
+    "@types/node": "^22.0.0",
+    "@types/react": "^18.3.0",
+    "@types/react-dom": "^18.3.0",
+    "@types/uuid": "^10.0.0",
+    "autoprefixer": "^10.4.0",
     "body-parser": "^2.2.0",
     "dotenv": "^16.6.1",
     "express": "^5.1.0",
+    "localtunnel": "^2.0.2",
+    "next": "15.1.4",
     "node-fetch": "^3.3.2",
+    "nodemailer": "^7.0.6",
+    "postcss": "^8.4.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-markdown": "^9.0.0",
+    "tailwindcss": "^3.4.0",
+    "typescript": "^5.0.0",
+    "uuid": "^13.0.0",
     "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "eslint": "^9.0.0",
+    "eslint-config-next": "15.1.4"
   }
 }

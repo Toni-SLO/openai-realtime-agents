@@ -7,7 +7,7 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const sessionId = searchParams.get('sessionId');
     
-    const transcriptsDir = path.join(process.cwd(), 'logs', 'transcripts');
+    const transcriptsDir = path.join(process.cwd(), 'server', 'logs', 'transcripts');
     
     // If sessionId provided, return specific transcript
     if (sessionId) {
