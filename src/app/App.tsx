@@ -100,6 +100,8 @@ function App() {
     sendEvent,
     interrupt,
     mute,
+    pushToTalkStart,
+    pushToTalkStop,
   } = useRealtimeSession({
     onConnectionChange: (s) => setSessionStatus(s as SessionStatus),
     onAgentHandoff: (agentName: string) => {
@@ -183,7 +185,8 @@ function App() {
         (a) => a.name === selectedAgentName
       );
       addTranscriptBreadcrumb(`Agent: ${selectedAgentName}`, currentAgent);
-      updateSession(!handoffTriggeredRef.current);
+      // Ne sprožaj odgovorov samodejno na prvi CONNECT; najprej naj seja postane realtime
+      updateSession(false);
       // Reset flag after handling so subsequent effects behave normally
       handoffTriggeredRef.current = false;
     }
@@ -256,7 +259,7 @@ function App() {
     setIsPTTUserSpeaking(false);
   };
 
-  const sendSimulatedUserMessage = (text: string) => {
+  const sendSimulatedUserMessage = async (text: string) => {
     const id = uuidv4().slice(0, 32);
     addTranscriptMessage(id, "user", text, true);
 
@@ -269,6 +272,7 @@ function App() {
         content: [{ type: 'input_text', text }],
       },
     });
+    // Upoštevamo originalni tok: brez dodatnega session.update ob začetku
     sendClientEvent({ type: 'response.create' }, '(simulated user text message)');
   };
 
@@ -289,6 +293,7 @@ function App() {
     sendEvent({
       type: 'session.update',
       session: {
+        type: 'realtime',
         turn_detection: turnDetection,
       },
     });
@@ -318,9 +323,9 @@ function App() {
     interrupt();
 
     setIsPTTUserSpeaking(true);
-    sendClientEvent({ type: 'input_audio_buffer.clear' }, 'clear PTT buffer');
+    try { pushToTalkStart(); } catch (e) { console.warn('PTT start failed', e); }
 
-    // No placeholder; we'll rely on server transcript once ready.
+    // No placeholder; rely on server transcript once ready.
   };
 
   const handleTalkButtonUp = () => {
@@ -328,8 +333,7 @@ function App() {
       return;
 
     setIsPTTUserSpeaking(false);
-    sendClientEvent({ type: 'input_audio_buffer.commit' }, 'commit PTT');
-    sendClientEvent({ type: 'response.create' }, 'trigger response PTT');
+    try { pushToTalkStop(); } catch (e) { console.warn('PTT stop failed', e); }
   };
 
   const onToggleConnection = () => {
@@ -434,7 +438,7 @@ function App() {
     // user disables playback. 
     try {
       mute(!isAudioPlaybackEnabled);
-    } catch (err) {
+    } catch (err: any) {
       // WebSocket transport doesn't support mute - that's expected
       if (!err.message?.includes('WebSocket transport')) {
         console.warn('Failed to toggle SDK mute', err);
@@ -448,7 +452,7 @@ function App() {
     if (sessionStatus === 'CONNECTED') {
       try {
         mute(!isAudioPlaybackEnabled);
-      } catch (err) {
+      } catch (err: any) {
         // WebSocket transport doesn't support mute - that's expected
         if (!err.message?.includes('WebSocket transport')) {
           console.warn('mute sync after connect failed', err);
