@@ -82,7 +82,7 @@ async function sendUrgentErrorEmail(errorType, errorDetails, callId, suggestions
 // Constants
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const OPENAI_PROJECT_ID = process.env.OPENAI_PROJECT_ID || "proj_cJHC8zDMUe6YkFQYVikfFKVM";
-const MODEL = process.env.GPT_REALTIME_MODEL || 'gpt-4o-realtime-preview-2024-10-01';
+const MODEL = process.env.GPT_REALTIME_MODEL || 'gpt-realtime';
 
 // Debug environment variables
 console.log('[sip-webhook] 🔧 Environment loaded:');
@@ -570,19 +570,34 @@ async function processCall(callId, event, callerFrom, callerPhone) {
             voice: VOICE,
             codec: SIP_CODEC,
             initialLanguage: initialLanguage,
-            transcriptionModel: 'gpt-4o-mini-transcribe'
+            transcriptionModel: 'gpt-4o-transcribe',
+            apiVersion: 'GA (gpt-realtime)',
+            userTranscription: 'Enabled with GA audio.input.transcription'
           }
         });
 
-        // Poenostavljena konfiguracija - samo potrebni parametri
+        // GA VERZIJA: Nova struktura za SIP transkripcije
         ws.send(JSON.stringify({
           type: 'session.update',
           session: {
-            type: 'realtime'
+            type: 'realtime',
+            model: 'gpt-realtime',
+            audio: {
+              input: {
+                format: { type: 'audio/pcmu' },
+                transcription: {
+                  model: 'gpt-4o-transcribe',
+                  language: 'hr'
+                },
+                turn_detection: { type: 'server_vad' }
+              },
+              output: {
+                format: { type: 'audio/pcmu' },
+                voice: 'marin'
+              }
+            }
           }
         }));
-        
-        // SIP klici ne podpirajo input_audio_transcription parametra
         
         console.log('[sip-webhook] 🎧 Audio format configured');
         
@@ -947,8 +962,7 @@ async function handleToolCall(ws, message, callerPhone, callId) {
       console.log('[sip-webhook] 📞 Agent-initiated hangup (immediate)');
       
       try {
-        // SIP klici ne uporabljajo turn_detection parametra
-        // Direktno zapremo povezavo
+        // Direktno zapremo povezavo brez spreminjanja session parametrov
         
         // Try to hangup via OpenAI API
         setTimeout(async () => {
@@ -993,8 +1007,28 @@ async function handleToolCall(ws, message, callerPhone, callId) {
       }
     }));
 
-    // SIP klici ne podpirajo input_audio_transcription parametra
-    // User sporočila se ne transkribirajo avtomatsko pri SIP klicih
+    // Obnovimo GA transkripcijo po tool klicu
+    ws.send(JSON.stringify({
+      type: 'session.update',
+      session: {
+        type: 'realtime',
+        model: 'gpt-realtime',
+        audio: {
+          input: {
+            format: { type: 'audio/pcmu' },
+            transcription: {
+              model: 'gpt-4o-transcribe',
+              language: callLanguages.get(callId) || 'hr'
+            },
+            turn_detection: { type: 'server_vad' }
+          },
+          output: {
+            format: { type: 'audio/pcmu' },
+            voice: 'marin'
+          }
+        }
+      }
+    }));
     
     // Trigger response so Maja can react to the tool result
     ws.send(JSON.stringify({ type: 'response.create' }));
