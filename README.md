@@ -24,7 +24,7 @@ There are two main patterns demonstrated:
 - This is a Next.js typescript app. Install dependencies with `npm i`.
 - Add your `OPENAI_API_KEY` to your env. Either add it to your `.bash_profile` or equivalent, or copy `.env.sample` to `.env` and add it there.
 - Start the server with `npm run dev`
-- Open your browser to [http://localhost:3000](http://localhost:3000). It should default to the `chatSupervisor` Agent Config.
+- Open your browser to [http://localhost:3000](http://localhost:3000). It should default to the `restoran` Agent Config.
 - You can change examples via the "Scenario" dropdown in the top right.
 
 # Agentic Pattern 1: Chat-Supervisor

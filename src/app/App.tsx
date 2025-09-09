@@ -24,11 +24,6 @@ import { createModerationGuardrail } from "@/app/agentConfigs/guardrails";
 
 // Agent configs
 import { allAgentSets, defaultAgentSetKey } from "@/app/agentConfigs";
-import { customerServiceRetailScenario } from "@/app/agentConfigs/customerServiceRetail";
-import { chatSupervisorScenario } from "@/app/agentConfigs/chatSupervisor";
-import { customerServiceRetailCompanyName } from "@/app/agentConfigs/customerServiceRetail";
-import { chatSupervisorCompanyName } from "@/app/agentConfigs/chatSupervisor";
-import { simpleHandoffScenario } from "@/app/agentConfigs/simpleHandoff";
 import { restoranCompanyName } from "@/app/agentConfigs/restoran";
 import { unifiedRestoranAgent } from "@/app/agentConfigs/restoran/unified";
 
@@ -40,9 +35,6 @@ const getRestoranScenario = (multiAgent: boolean): RealtimeAgent[] => {
 
 // Map used by connect logic for scenarios defined via the SDK.
 const getSdkScenarioMap = (multiAgent: boolean): Record<string, RealtimeAgent[]> => ({
-  simpleHandoff: simpleHandoffScenario,
-  customerServiceRetail: customerServiceRetailScenario,
-  chatSupervisor: chatSupervisorScenario,
   restoran: getRestoranScenario(multiAgent),
 });
 
@@ -238,11 +230,7 @@ function App() {
           reorderedAgents.unshift(agent);
         }
 
-        const companyName = agentSetKey === 'customerServiceRetail'
-          ? customerServiceRetailCompanyName
-          : agentSetKey === 'restoran'
-          ? restoranCompanyName
-          : chatSupervisorCompanyName;
+        const companyName = restoranCompanyName;
         const guardrail = createModerationGuardrail(companyName);
 
         await connect({
@@ -447,7 +435,10 @@ function App() {
     try {
       mute(!isAudioPlaybackEnabled);
     } catch (err) {
-      console.warn('Failed to toggle SDK mute', err);
+      // WebSocket transport doesn't support mute - that's expected
+      if (!err.message?.includes('WebSocket transport')) {
+        console.warn('Failed to toggle SDK mute', err);
+      }
     }
   }, [isAudioPlaybackEnabled]);
 
@@ -458,7 +449,10 @@ function App() {
       try {
         mute(!isAudioPlaybackEnabled);
       } catch (err) {
-        console.warn('mute sync after connect failed', err);
+        // WebSocket transport doesn't support mute - that's expected
+        if (!err.message?.includes('WebSocket transport')) {
+          console.warn('mute sync after connect failed', err);
+        }
       }
     }
   }, [sessionStatus, isAudioPlaybackEnabled]);

@@ -122,6 +122,13 @@ export function useRealtimeSession(callbacks: RealtimeSessionCallbacks = {}) {
       updateStatus('CONNECTING');
 
       const ek = await getEphemeralKey();
+      if (!ek) {
+        console.error('[useRealtimeSession] No ephemeral key provided');
+        updateStatus('DISCONNECTED');
+        return;
+      }
+      console.log('[useRealtimeSession] Using ephemeral key:', ek.substring(0, 20) + '...');
+      
       const rootAgent = initialAgents[0];
 
       // This lets you use the codec selector in the UI to force narrow-band (8 kHz) codecs to
@@ -130,14 +137,7 @@ export function useRealtimeSession(callbacks: RealtimeSessionCallbacks = {}) {
       const audioFormat = audioFormatForCodec(codecParam);
 
       sessionRef.current = new RealtimeSession(rootAgent, {
-        transport: new OpenAIRealtimeWebRTC({
-          audioElement,
-          // Set preferred codec before offer creation
-          changePeerConnection: async (pc: RTCPeerConnection) => {
-            applyCodec(pc);
-            return pc;
-          },
-        }),
+        transport: 'websocket',
         model: GPT_REALTIME_MODEL,
         config: {
           inputAudioFormat: audioFormat,
