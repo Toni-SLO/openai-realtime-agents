@@ -1,0 +1,10 @@
+[33mecb7c3d[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m)[m Posodobitev navodil za enotno delovanje agenta, dodana podpora za dinamično zaznavanje jezika in izboljšave v obdelavi transkriptov. Spremembe v modelu in kodeku za SIP, vključno z optimizacijo obdelave klicev in izboljšavami v povezavi z MCP. Odstranjene neuporabljene datoteke in izboljšana struktura kode.
+[33m935a4f7[m Dodana povezava za urejanje navodil v aplikaciji in posodobljena navodila za enotno delovanje, vključno z izboljšavami v jeziku in strukturi. Izvožene funkcije za pridobitev menija za agente.
+[33mcb6df8d[m Dodana podpora za več agentov v aplikaciji, vključno z novimi skripti za zagon in izboljšavami v konfiguracijah agentov. Posodobljene odvisnosti v package.json in package-lock.json, dodane nove funkcionalnosti za obdelavo transkriptov ter izboljšave v povezavi z MCP in SIP. Spremembe v agentovih navodilih za enotno delovanje.
+[33m5edb9aa[m DELUJE SOLIDNO, PRED PRENOVO! Posodobitev .env z novimi spremenljivkami, dodajanje novih odvisnosti v package.json in package-lock.json, sprememba glasu agentov na 'marin' v več datotekah ter izboljšave v agent konfiguracijah in Twilio klientu. Dodana podpora za MCP in optimizacija obdelave klicev.
+[33m4be2805[m Posodobitev .gitignore datoteke z reorganizacijo in dodajanjem novih pravil za ignoriranje, vključno z odvisnostmi, izhodnimi datotekami, pokritostjo testov, okolijskimi datotekami, dnevniki in datotekami IDE.
+[33md078c4b[m Posodobitev .env.sample z novimi API ključi in URL-ji ter dodajanje novih odvisnosti v package.json in package-lock.json. Dodan nov scenarij 'restoran' v aplikacijo in sprememba glasu agentov na 'marin' v več datotekah. Dodana MCP podpora. Osnovno deluje.
+[33md6bd1a5[m Merge pull request #96 from openai/f/fix-build-errors
+[33mb877e8e[m fix build errors/warnings
+[33m3c4e0ca[m Merge pull request #69 from openai/danial-openai-patch-1
+[33m9b4fb6d[m[33m ([m[1;31morigin/danial-openai-patch-1[m[33m)[m Update model slug

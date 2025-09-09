@@ -30,26 +30,12 @@ import { customerServiceRetailCompanyName } from "@/app/agentConfigs/customerSer
 import { chatSupervisorCompanyName } from "@/app/agentConfigs/chatSupervisor";
 import { simpleHandoffScenario } from "@/app/agentConfigs/simpleHandoff";
 import { restoranCompanyName } from "@/app/agentConfigs/restoran";
-import { greeterAgent } from "@/app/agentConfigs/restoran/greeter";
-import { reservationAgent } from "@/app/agentConfigs/restoran/reservation";
-import { orderAgent } from "@/app/agentConfigs/restoran/order";
-import { handoffAgent } from "@/app/agentConfigs/restoran/handoff";
 import { unifiedRestoranAgent } from "@/app/agentConfigs/restoran/unified";
 
-// Dynamic scenario for restaurant based on multi-agent mode
+// Dynamic scenario for restaurant - UNIFIED AGENT ONLY
 const getRestoranScenario = (multiAgent: boolean): RealtimeAgent[] => {
-  if (multiAgent) {
-    // Multi-agent scenario with handoffs
-    greeterAgent.handoffs = [reservationAgent, orderAgent, handoffAgent];
-    reservationAgent.handoffs = [greeterAgent, orderAgent, handoffAgent];
-    orderAgent.handoffs = [greeterAgent, reservationAgent, handoffAgent];
-    handoffAgent.handoffs = [greeterAgent, reservationAgent, orderAgent];
-    
-    return [greeterAgent, reservationAgent, orderAgent, handoffAgent];
-  } else {
-    // Single unified agent
-    return [unifiedRestoranAgent];
-  }
+  // Always return unified agent (multi-agent mode is deprecated)
+  return [unifiedRestoranAgent];
 };
 
 // Map used by connect logic for scenarios defined via the SDK.

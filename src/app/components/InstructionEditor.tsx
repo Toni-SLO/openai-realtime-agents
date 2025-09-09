@@ -3,10 +3,6 @@
 import React, { useState, useEffect } from 'react';
 import { MarkdownEditor } from './MarkdownEditor';
 import {
-  FANCITA_RESERVATION_INSTRUCTIONS,
-  FANCITA_GREETER_INSTRUCTIONS,
-  FANCITA_ORDER_INSTRUCTIONS,
-  FANCITA_HANDOFF_INSTRUCTIONS,
   FANCITA_UNIFIED_INSTRUCTIONS,
 } from '../agentConfigs/shared/instructions';
 
@@ -19,33 +15,9 @@ interface InstructionCategory {
 
 const INSTRUCTION_CATEGORIES: InstructionCategory[] = [
   {
-    id: 'reservation',
-    name: 'Rezervacije',
-    description: 'Instrukcije za agenta za rezervacije miz',
-    content: FANCITA_RESERVATION_INSTRUCTIONS,
-  },
-  {
-    id: 'greeter',
-    name: 'Pozdrav',
-    description: 'Instrukcije za greeting agenta',
-    content: FANCITA_GREETER_INSTRUCTIONS,
-  },
-  {
-    id: 'order',
-    name: 'Naročila',
-    description: 'Instrukcije za agenta za sprejemanje naročil',
-    content: FANCITA_ORDER_INSTRUCTIONS,
-  },
-  {
-    id: 'handoff',
-    name: 'Prenos klicev',
-    description: 'Instrukcije za handoff agenta',
-    content: FANCITA_HANDOFF_INSTRUCTIONS,
-  },
-  {
     id: 'unified',
-    name: 'Poenotene',
-    description: 'Poenotene instrukcije za vse funkcionalnosti',
+    name: 'Poenotene Instrukcije',
+    description: 'Poenotene instrukcije za vse funkcionalnosti - rezervacije, naročila, handoff',
     content: FANCITA_UNIFIED_INSTRUCTIONS,
   },
 ];

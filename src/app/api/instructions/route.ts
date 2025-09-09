@@ -4,12 +4,8 @@ import path from 'path';
 
 const INSTRUCTION_FILE_PATH = path.join(process.cwd(), 'src/app/agentConfigs/shared/instructions.ts');
 
-// Map of category IDs to export names
+// Map of category IDs to export names - UNIFIED ONLY
 const CATEGORY_EXPORT_MAP: Record<string, string> = {
-  'reservation': 'FANCITA_RESERVATION_INSTRUCTIONS',
-  'greeter': 'FANCITA_GREETER_INSTRUCTIONS',
-  'order': 'FANCITA_ORDER_INSTRUCTIONS',
-  'handoff': 'FANCITA_HANDOFF_INSTRUCTIONS',
   'unified': 'FANCITA_UNIFIED_INSTRUCTIONS',
 };
 

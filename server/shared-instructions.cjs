@@ -31,12 +31,8 @@ function replaceInstructionVariables(instructions, callerId, conversationId, ses
     .replace(/\{\{session_language\}\}/g, sessionLanguage);
 }
 
-// Export functions
+// Export functions - UNIFIED ONLY
 module.exports = {
   FANCITA_UNIFIED_INSTRUCTIONS: () => extractInstruction('FANCITA_UNIFIED_INSTRUCTIONS'),
-  FANCITA_RESERVATION_INSTRUCTIONS: () => extractInstruction('FANCITA_RESERVATION_INSTRUCTIONS'),
-  FANCITA_GREETER_INSTRUCTIONS: () => extractInstruction('FANCITA_GREETER_INSTRUCTIONS'),
-  FANCITA_ORDER_INSTRUCTIONS: () => extractInstruction('FANCITA_ORDER_INSTRUCTIONS'),
-  FANCITA_HANDOFF_INSTRUCTIONS: () => extractInstruction('FANCITA_HANDOFF_INSTRUCTIONS'),
   replaceInstructionVariables
 };
