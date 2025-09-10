@@ -1,6 +1,6 @@
 -'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 
 interface TranscriptEvent {
   timestamp: string;
@@ -31,6 +31,8 @@ export function TranscriptViewer() {
   const [transcriptMetadata, setTranscriptMetadata] = useState<{[key: string]: any}>({});
   const [isVisible, setIsVisible] = useState(false);
   const [liveTranscripts, setLiveTranscripts] = useState<{[sessionId: string]: TranscriptEvent[]}>({});
+  const [autoScroll, setAutoScroll] = useState(true);
+  const transcriptEndRef = useRef<HTMLDivElement>(null);
 
   const loadTranscripts = async () => {
     try {
@@ -114,7 +116,8 @@ export function TranscriptViewer() {
     ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
-        if (data.type === 'transcript_event') {
+        
+        if (data.type === 'transcript_update' || data.type === 'transcript_event') {
           const { sessionId, event: transcriptEvent } = data;
           
           setLiveTranscripts(prev => ({
@@ -122,10 +125,49 @@ export function TranscriptViewer() {
             [sessionId]: [...(prev[sessionId] || []), transcriptEvent]
           }));
           
+          // Auto-select new live sessions
+          if (!selectedSessionId || selectedSessionId === sessionId) {
+            setSelectedTranscript(prev => prev ? [...prev, transcriptEvent] : [transcriptEvent]);
+            setSelectedSessionId(sessionId);
+            
+            // Auto-scroll to bottom for live sessions
+            if (autoScroll && liveTranscripts[sessionId]) {
+              setTimeout(() => {
+                transcriptEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+              }, 100);
+            }
+          }
+          
           // Refresh transcript list to show new sessions
           if (isVisible) {
             loadTranscripts();
           }
+        } else if (data.type === 'new_sip_session') {
+          const { sessionId } = data;
+          console.log('[TranscriptViewer] New SIP session started:', sessionId);
+          
+          // Initialize empty transcript for new session
+          setLiveTranscripts(prev => ({
+            ...prev,
+            [sessionId]: []
+          }));
+        } else if (data.type === 'session_ended') {
+          const { sessionId } = data;
+          console.log('[TranscriptViewer] SIP session ended:', sessionId);
+          
+          // Move from live to completed after a delay
+          setTimeout(() => {
+            setLiveTranscripts(prev => {
+              const newLive = { ...prev };
+              delete newLive[sessionId];
+              return newLive;
+            });
+            
+            // Refresh to show in completed list
+            if (isVisible) {
+              loadTranscripts();
+            }
+          }, 5000); // 5 second delay
         }
       } catch (error) {
         console.error('[TranscriptViewer] Error processing message:', error);
@@ -200,6 +242,37 @@ export function TranscriptViewer() {
           {/* Left panel - Transcript list */}
           <div className="w-1/3 border-r bg-gray-50 overflow-y-auto">
             <div className="p-4">
+              {/* Live calls section */}
+              {Object.keys(liveTranscripts).length > 0 && (
+                <div className="mb-6">
+                  <h3 className="font-semibold text-green-600 mb-3">🔴 LIVE Pozivi</h3>
+                  <div className="space-y-2">
+                    {Object.entries(liveTranscripts).map(([sessionId, events]) => (
+                      <div
+                        key={sessionId}
+                        onClick={() => {
+                          setSelectedTranscript(events);
+                          setSelectedSessionId(sessionId);
+                        }}
+                        className={`p-3 rounded cursor-pointer border border-green-200 bg-green-50 hover:bg-green-100 ${
+                          selectedSessionId === sessionId ? 'ring-2 ring-green-400' : ''
+                        }`}
+                      >
+                        <div className="flex items-center text-sm font-semibold text-green-700 mb-1">
+                          🔴 LIVE - {sessionId.slice(-8)}
+                        </div>
+                        <div className="text-xs text-green-600">
+                          {events.length} događaja
+                        </div>
+                        <div className="text-xs text-green-500">
+                          Poslednji: {events.length > 0 ? formatTimestamp(events[events.length - 1].timestamp) : 'N/A'}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              
               <div className="flex items-center justify-between mb-4">
                 <h3 className="font-semibold">Recent Calls</h3>
                 <button
@@ -267,9 +340,35 @@ export function TranscriptViewer() {
             ) : selectedTranscript ? (
               <div className="p-4">
                 <div className="mb-4">
-                  <h3 className="font-semibold">Call: {selectedSessionId.slice(-8)}</h3>
-                  <div className="text-sm text-gray-600">
-                    {selectedTranscript.length} events
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-semibold">
+                      {liveTranscripts[selectedSessionId] ? '🔴 LIVE' : '📋'} Call: {selectedSessionId.slice(-8)}
+                    </h3>
+                    {liveTranscripts[selectedSessionId] && (
+                      <span className="bg-red-100 text-red-700 text-xs px-2 py-1 rounded-full animate-pulse">
+                        UŽIVO
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <div className="text-sm text-gray-600">
+                      {selectedTranscript.length} događaja
+                      {liveTranscripts[selectedSessionId] && (
+                        <span className="ml-2 text-green-600">• Poziv u toku</span>
+                      )}
+                    </div>
+                    {liveTranscripts[selectedSessionId] && (
+                      <button
+                        onClick={() => setAutoScroll(!autoScroll)}
+                        className={`text-xs px-2 py-1 rounded ${
+                          autoScroll 
+                            ? 'bg-green-100 text-green-700' 
+                            : 'bg-gray-100 text-gray-600'
+                        }`}
+                      >
+                        {autoScroll ? '📍 Auto-scroll' : '📍 Manual'}
+                      </button>
+                    )}
                   </div>
                 </div>
                 
@@ -312,6 +411,30 @@ export function TranscriptViewer() {
                           )}
                         </div>
                       )}
+                      
+                      {/* Reservation summary for tool calls */}
+                      {(event as any).reservation_summary && (
+                        <div className="mt-2 p-2 bg-blue-50 rounded border border-blue-200">
+                          <div className="text-sm font-medium text-blue-800 mb-1">
+                            📋 Podaci o rezervaciji:
+                          </div>
+                          <div className="text-sm text-blue-700">
+                            {(event as any).reservation_summary}
+                          </div>
+                        </div>
+                      )}
+                      
+                      {/* Result summary for tool results */}
+                      {(event as any).result_summary && (
+                        <div className="mt-2 p-2 bg-green-50 rounded border border-green-200">
+                          <div className="text-sm font-medium text-green-800 mb-1">
+                            📊 Rezultat:
+                          </div>
+                          <div className="text-sm text-green-700">
+                            {(event as any).result_summary}
+                          </div>
+                        </div>
+                      )}
 
                       {/* Show metadata for tool events and session events */}
                       {event.metadata && (event.type === 'tool_call' || event.type === 'tool_result' || event.type === 'session_start' || event.type === 'language_change') && (
@@ -325,6 +448,8 @@ export function TranscriptViewer() {
 
                     </div>
                   ))}
+                  {/* Auto-scroll anchor for live transcripts */}
+                  <div ref={transcriptEndRef} />
                 </div>
               </div>
             ) : (

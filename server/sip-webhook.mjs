@@ -105,9 +105,6 @@ console.log(`[sip-webhook] 🏗️  Project ID raw: ${process.env.OPENAI_PROJECT
 console.log(`[sip-webhook] 🤖 Model: ${MODEL}`);
 console.log(`[sip-webhook] 📧 Email: ${process.env.URGENT_ERROR_EMAIL || 'NOT_SET'}`);
 console.log(`[sip-webhook] 🔗 MCP_SERVER_URL: ${process.env.MCP_SERVER_URL ? 'SET' : 'NOT SET'}`);
-if (process.env.MCP_SERVER_URL) {
-  console.log(`[sip-webhook] 🔗 MCP URL FULL: ${process.env.MCP_SERVER_URL}`);
-}
 
 const VOICE = process.env.OPENAI_REALTIME_VOICE || 'marin';
 // Use G.711 μ-law for guaranteed SIP compatibility
@@ -257,9 +254,10 @@ function logTranscriptEvent(sessionId, event) {
     console.log(`[sip-webhook] 📝 Logged ${event.type} for ${sessionId}`);
     
     // 2. Send to transcript bridge for real-time display
+    console.log(`[sip-webhook] 📡 Attempting to send ${event.type} to bridge...`);
     sendToTranscriptBridge(sessionId, event);
   } catch (error) {
-    console.warn('[sip-webhook] Failed to log transcript:', error.message);
+    console.warn('[sip-webhook] ❌ Failed to log transcript:', error.message);
   }
 }
 
@@ -270,25 +268,28 @@ function connectToBridge() {
   if (bridgeWs && bridgeWs.readyState === WebSocket.OPEN) return;
   
   try {
+    console.log('[sip-webhook] 🌉 Attempting to connect to transcript bridge...');
     bridgeWs = new WebSocket('ws://localhost:3002');
     
     bridgeWs.on('open', () => {
-      console.log('[sip-webhook] 🌉 Connected to transcript bridge');
+      console.log('[sip-webhook] 🌉 ✅ Connected to transcript bridge');
     });
     
     bridgeWs.on('error', (error) => {
-      console.warn('[sip-webhook] 🌉 Bridge connection error:', error.message);
+      console.warn('[sip-webhook] 🌉 ❌ Bridge connection error:', error.message);
       bridgeWs = null;
     });
     
     bridgeWs.on('close', () => {
-      console.log('[sip-webhook] 🌉 Bridge connection closed');
+      console.log('[sip-webhook] 🌉 Bridge connection closed, will retry in 5s');
       bridgeWs = null;
       // Reconnect after delay
       setTimeout(connectToBridge, 5000);
     });
   } catch (error) {
-    console.warn('[sip-webhook] 🌉 Failed to connect to bridge:', error.message);
+    console.warn('[sip-webhook] 🌉 ❌ Failed to connect to bridge:', error.message);
+    // Retry after delay
+    setTimeout(connectToBridge, 5000);
   }
 }
 
@@ -296,6 +297,7 @@ function connectToBridge() {
 function sendToTranscriptBridge(sessionId, event) {
   try {
     if (!bridgeWs || bridgeWs.readyState !== WebSocket.OPEN) {
+      console.log(`[sip-webhook] 📡 Bridge not ready, attempting reconnect for ${event.type}`);
       connectToBridge();
       return; // Skip this event, will work for next ones
     }
@@ -307,10 +309,11 @@ function sendToTranscriptBridge(sessionId, event) {
     };
     
     bridgeWs.send(JSON.stringify(data));
-    console.log(`[sip-webhook] 📡 Sent ${event.type} to bridge for ${sessionId}`);
+    console.log(`[sip-webhook] 📡 ✅ Sent ${event.type} to bridge for ${sessionId}`);
   } catch (error) {
-    console.warn('[sip-webhook] Failed to send to bridge:', error.message);
+    console.warn('[sip-webhook] 📡 ❌ Failed to send to bridge:', error.message);
     bridgeWs = null; // Reset connection
+    connectToBridge(); // Try to reconnect immediately
   }
 }
 
@@ -719,16 +722,35 @@ async function processCall(callId, event, callerFrom, callerPhone) {
             pendingToolResults.get(callId).add(message.call_id);
             console.log(`[sip-webhook] 🔧 Tool call: ${message.name}`);
             
+            // Enhanced logging with reservation details
+            let toolDescription = message.name;
+            let reservationSummary = '';
+            
+            if (message.name === 's6792596_fancita_rezervation_supabase') {
+              toolDescription = 'Rezervacija stola';
+              reservationSummary = `${parsedArgs.name || 'N/A'} | ${parsedArgs.date || 'N/A'} ${parsedArgs.time || 'N/A'} | ${parsedArgs.guests_number || 'N/A'} osoba/e | ${parsedArgs.location || 'terasa'} | Tel: ${parsedArgs.tel || 'N/A'}`;
+            } else if (message.name === 's6798488_fancita_order_supabase') {
+              toolDescription = 'Narudžba hrane';
+              const itemsCount = parsedArgs.items?.length || 0;
+              reservationSummary = `${parsedArgs.name || 'N/A'} | ${parsedArgs.date || 'N/A'} ${parsedArgs.delivery_time || 'N/A'} | ${itemsCount} stavki | ${parsedArgs.total || 'N/A'}€ | ${parsedArgs.delivery_type || 'N/A'}`;
+            } else if (message.name === 'end_call') {
+              toolDescription = 'Završetak poziva';
+              reservationSummary = parsedArgs.reason || 'Poziv završen';
+            }
+            
             logTranscriptEvent(callId, {
               type: 'tool_call',
               tool_name: message.name,
+              tool_description: toolDescription,
               arguments: parsedArgs,
               call_id: message.call_id,
+              reservation_summary: reservationSummary,
               timestamp: new Date().toISOString(),
               metadata: {
                 toolName: message.name,
                 callId: message.call_id,
-                argumentCount: Object.keys(parsedArgs).length
+                argumentCount: Object.keys(parsedArgs).length,
+                reservationData: parsedArgs
               }
             });
           } else if (message.type === 'conversation.item.created' && message.item?.type === 'function_call_output') {
@@ -736,16 +758,32 @@ async function processCall(callId, event, callerFrom, callerPhone) {
             const output = message.item.output || {};
             const parsedOutput = typeof output === 'string' ? JSON.parse(output) : output;
             
+            // Enhanced result logging with success details
+            let resultSummary = '';
+            if (parsedOutput.success) {
+              if (parsedOutput.data?.reservation_id) {
+                resultSummary = `✅ Rezervacija uspješno zavedena (ID: ${parsedOutput.data.reservation_id})`;
+              } else if (parsedOutput.data?.order_id) {
+                resultSummary = `✅ Narudžba uspješno zavedena (ID: ${parsedOutput.data.order_id})`;
+              } else {
+                resultSummary = '✅ Uspješno izvršeno';
+              }
+            } else {
+              resultSummary = `❌ Greška: ${parsedOutput.error || 'Nepoznata greška'}`;
+            }
+            
             logTranscriptEvent(callId, {
               type: 'tool_result',
               tool_call_id: message.item.call_id,
               result: parsedOutput,
+              result_summary: resultSummary,
               timestamp: new Date().toISOString(),
               metadata: {
                 callId: message.item.call_id,
                 status: parsedOutput.success ? 'success' : 'error',
                 mode: parsedOutput.mode || 'mcp',
-                mcpSuccess: parsedOutput.success === true
+                mcpSuccess: parsedOutput.success === true,
+                resultData: parsedOutput.data || null
               }
             });
             
@@ -899,7 +937,7 @@ async function handleToolCall(ws, message, callerPhone, callId) {
       const nextjsApiUrl = process.env.NEXTJS_API_URL || 'http://localhost:3000';
       const mcpApiUrl = `${nextjsApiUrl}/api/mcp`;
       
-      console.log(`[sip-webhook] 🔍 Trying Next.js MCP API: ${mcpApiUrl}`);
+      console.log(`[sip-webhook] 🔍 Trying Next.js MCP API`);
       
       try {
         const response = await fetch(mcpApiUrl, {
@@ -929,7 +967,7 @@ async function handleToolCall(ws, message, callerPhone, callId) {
         
         // Fallback to direct Make.com call (original approach)
         const mcpUrl = process.env.MCP_SERVER_URL;
-        console.log(`[sip-webhook] 🔍 DEBUG: Using direct MCP URL: ${mcpUrl}`);
+        console.log(`[sip-webhook] 🔍 Using direct MCP URL`);
         if (!mcpUrl) {
           throw new Error('Neither Next.js API nor MCP_SERVER_URL available');
         }
