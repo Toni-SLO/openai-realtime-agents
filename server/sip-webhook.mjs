@@ -32,6 +32,11 @@ const { FANCITA_UNIFIED_INSTRUCTIONS, replaceInstructionVariables: sharedReplace
 
 const PORT = parseInt(process.env.SIP_WEBHOOK_PORT || '3003', 10);
 
+// Conference mappings for warm transfer architecture (following Twilio tutorial)
+global.callIDtoConferenceNameMapping = global.callIDtoConferenceNameMapping || {};
+global.ConferenceNametoCallerIDMapping = global.ConferenceNametoCallerIDMapping || {};
+global.ConferenceNametoCallTokenMapping = global.ConferenceNametoCallTokenMapping || {};
+
 // Email konfiguracija za urgentna obvestila
 const URGENT_ERROR_EMAIL = process.env.URGENT_ERROR_EMAIL;
 let emailTransporter = null;
@@ -105,6 +110,10 @@ console.log(`[sip-webhook] 🏗️  Project ID raw: ${process.env.OPENAI_PROJECT
 console.log(`[sip-webhook] 🤖 Model: ${MODEL}`);
 console.log(`[sip-webhook] 📧 Email: ${process.env.URGENT_ERROR_EMAIL || 'NOT_SET'}`);
 console.log(`[sip-webhook] 🔗 MCP_SERVER_URL: ${process.env.MCP_SERVER_URL ? 'SET' : 'NOT SET'}`);
+console.log(`[sip-webhook] 📞 Staff Phone: ${process.env.STAFF_PHONE_NUMBER ? 'SET' : 'NOT SET'}`);
+console.log(`[sip-webhook] 📞 Twilio Account: ${process.env.TWILIO_ACCOUNT_SID ? 'SET' : 'NOT SET'}`);
+console.log(`[sip-webhook] 📞 Twilio Auth: ${process.env.TWILIO_AUTH_TOKEN ? 'SET' : 'NOT SET'}`);
+console.log(`[sip-webhook] 📞 Twilio Phone: ${process.env.TWILIO_PHONE_NUMBER ? 'SET' : 'NOT SET'}`);
 
 const VOICE = process.env.OPENAI_REALTIME_VOICE || 'marin';
 // Use G.711 μ-law for guaranteed SIP compatibility
@@ -320,6 +329,264 @@ function sendToTranscriptBridge(sessionId, event) {
 // Initialize bridge connection
 connectToBridge();
 
+// Staff transfer functionality using direct Twilio call (no conference)
+async function createStaffConference(callId, guestPhone, staffPhone, problemSummary) {
+  try {
+    console.log(`[sip-webhook] 🔧 DEBUG: createStaffConference called (direct call mode)`);
+    console.log(`[sip-webhook] 🔧 DEBUG: callId = ${callId}`);
+    console.log(`[sip-webhook] 🔧 DEBUG: guestPhone = ${guestPhone}`);
+    console.log(`[sip-webhook] 🔧 DEBUG: staffPhone = ${staffPhone}`);
+    console.log(`[sip-webhook] 🔧 DEBUG: problemSummary = ${problemSummary}`);
+    
+    const twilioAccountSid = process.env.TWILIO_ACCOUNT_SID;
+    const twilioAuthToken = process.env.TWILIO_AUTH_TOKEN;
+    const twilioPhoneNumber = process.env.TWILIO_PHONE_NUMBER;
+    
+    console.log(`[sip-webhook] 🔧 DEBUG: Twilio credentials check:`);
+    console.log(`[sip-webhook] 🔧 DEBUG: TWILIO_ACCOUNT_SID = ${twilioAccountSid ? 'SET' : 'NOT SET'}`);
+    console.log(`[sip-webhook] 🔧 DEBUG: TWILIO_AUTH_TOKEN = ${twilioAuthToken ? 'SET' : 'NOT SET'}`);
+    console.log(`[sip-webhook] 🔧 DEBUG: TWILIO_PHONE_NUMBER = ${twilioPhoneNumber ? 'SET' : 'NOT SET'}`);
+    
+    if (!twilioAccountSid || !twilioAuthToken || !twilioPhoneNumber) {
+      const error = 'Twilio credentials not configured (TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER)';
+      console.log(`[sip-webhook] ❌ ${error}`);
+      return {
+        success: false,
+        error: error
+      };
+    }
+    
+    // Call staff member with English summary (Twilio voice works better with English)
+    const englishSummary = `Call from Fancita Restaurant. Guest issue: ${problemSummary}. Guest is waiting on the line. Press any key to connect.`;
+    
+    console.log(`[sip-webhook] 📞 Calling staff directly: ${staffPhone}`);
+    
+    const staffCallResponse = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${twilioAccountSid}/Calls.json`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Basic ${Buffer.from(`${twilioAccountSid}:${twilioAuthToken}`).toString('base64')}`,
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      body: new URLSearchParams({
+        From: twilioPhoneNumber,
+        To: staffPhone,
+        Url: `${process.env.WEBHOOK_BASE_URL || 'https://fancita-webhook.loca.lt'}/staff-direct-twiml?callId=${encodeURIComponent(callId)}&summary=${encodeURIComponent(englishSummary)}`,
+        Method: 'GET',
+        StatusCallback: `${process.env.WEBHOOK_BASE_URL || 'https://fancita-webhook.loca.lt'}/call-status`,
+        StatusCallbackMethod: 'POST'
+      })
+    });
+    
+    if (!staffCallResponse.ok) {
+      const errorText = await staffCallResponse.text();
+      console.log(`[sip-webhook] ❌ Failed to call staff: ${staffCallResponse.status} ${errorText}`);
+      return {
+        success: false,
+        error: `Failed to call staff: ${staffCallResponse.status} ${errorText}`
+      };
+    }
+    
+    const staffCall = await staffCallResponse.json();
+    console.log(`[sip-webhook] 📞 Staff call initiated: ${staffCall.sid}`);
+    
+    // Store the call info for later redirect via TwiML
+    console.log(`[sip-webhook] 📞 Staff call initiated, storing call info for redirect...`);
+    
+    // Store call mapping for TwiML redirect
+    if (!global.pendingTransfers) {
+      global.pendingTransfers = new Map();
+    }
+    global.pendingTransfers.set(callId, {
+      staffPhone: staffPhone,
+      staffCallSid: staffCall.sid,
+      guestPhone: guestPhone,
+      guestCallSid: null, // Will be set when we have it
+      timestamp: Date.now()
+    });
+    
+    console.log(`[sip-webhook] 📞 Call info stored for ${callId}, staff will be connected via TwiML`);
+    
+    // The actual redirect will happen when staff presses a key via /staff-connect endpoint
+    
+    return {
+      success: true,
+      staff_call_sid: staffCall.sid,
+      transfer_method: 'direct_call'
+    };
+    
+  } catch (error) {
+    console.error('[sip-webhook] ❌ Staff transfer error:', error);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+}
+
+// New conference-based approach (following Twilio tutorial)
+// NEW: Schedule staff callback after Maja ends call
+async function scheduleStaffCallback(callId, problemSummary, guestPhone) {
+  console.log(`[sip-webhook] 📞 Scheduling staff callback for ${callId}`);
+  console.log(`[sip-webhook] 📞 Guest phone: ${guestPhone}`);
+  console.log(`[sip-webhook] 📞 Problem: ${problemSummary}`);
+  
+  const conferenceName = `callback_${callId}_${Date.now()}`;
+  const staffPhone = process.env.STAFF_PHONE_NUMBER;
+  const twilioAccountSid = process.env.TWILIO_ACCOUNT_SID;
+  const twilioAuthToken = process.env.TWILIO_AUTH_TOKEN;
+  const twilioPhoneNumber = process.env.TWILIO_PHONE_NUMBER;
+  
+  if (!staffPhone || !twilioAccountSid || !twilioAuthToken || !twilioPhoneNumber) {
+    console.error(`[sip-webhook] ❌ Missing required credentials for callback`);
+    return { success: false, error: 'Missing credentials' };
+  }
+  
+  // Store callback info
+  if (!global.pendingCallbacks) {
+    global.pendingCallbacks = new Map();
+  }
+  
+  global.pendingCallbacks.set(callId, {
+    conferenceName,
+    guestPhone,
+    staffPhone,
+    problemSummary,
+    timestamp: Date.now(),
+    status: 'scheduled'
+  });
+  
+  try {
+    console.log(`[sip-webhook] 📞 Calling staff first: ${staffPhone}`);
+    
+    // Step 1: Call staff first with summary
+    const staffCallResponse = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${twilioAccountSid}/Calls.json`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Basic ${Buffer.from(`${twilioAccountSid}:${twilioAuthToken}`).toString('base64')}`,
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      body: new URLSearchParams({
+        From: twilioPhoneNumber,
+        To: staffPhone,
+        Url: `${process.env.WEBHOOK_BASE_URL || 'https://fancita-webhook.loca.lt'}/staff-callback-twiml?callId=${callId}&conferenceName=${encodeURIComponent(conferenceName)}`,
+        Method: 'GET',
+        StatusCallback: `${process.env.WEBHOOK_BASE_URL || 'https://fancita-webhook.loca.lt'}/staff-callback-status`,
+        StatusCallbackEvent: 'answered,completed',
+        StatusCallbackMethod: 'POST'
+      })
+    });
+    
+    if (staffCallResponse.ok) {
+      const staffCallData = await staffCallResponse.json();
+      console.log(`[sip-webhook] ✅ Staff call initiated: ${staffCallData.sid}`);
+      
+      // Update callback info
+      const callbackInfo = global.pendingCallbacks.get(callId);
+      if (callbackInfo) {
+        callbackInfo.staffCallSid = staffCallData.sid;
+        callbackInfo.status = 'calling_staff';
+        global.pendingCallbacks.set(callId, callbackInfo);
+      }
+      
+      return {
+        success: true,
+        message: 'Staff callback scheduled',
+        conference_name: conferenceName,
+        staff_call_sid: staffCallData.sid
+      };
+      
+    } else {
+      const errorText = await staffCallResponse.text();
+      console.error(`[sip-webhook] ❌ Failed to call staff: ${staffCallResponse.status} ${errorText}`);
+      return { success: false, error: `Failed to call staff: ${staffCallResponse.status}` };
+    }
+    
+  } catch (error) {
+    console.error(`[sip-webhook] ❌ Error scheduling staff callback: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+}
+
+async function addHumanToConference(callId, problemSummary) {
+  console.log(`[sip-webhook] 🔧 DEBUG: addHumanToConference called (conference mode)`);
+  console.log(`[sip-webhook] 🔧 DEBUG: callId = ${callId}`);
+  console.log(`[sip-webhook] 🔧 DEBUG: problemSummary = ${problemSummary}`);
+  
+  // Get conference name from mapping
+  const conferenceName = global.callIDtoConferenceNameMapping[callId];
+  const callerID = global.ConferenceNametoCallerIDMapping[conferenceName];
+  const callToken = global.ConferenceNametoCallTokenMapping[conferenceName];
+  
+  if (!conferenceName) {
+    console.error(`[sip-webhook] ❌ Conference name not found for call ID: ${callId}`);
+    return { success: false, error: 'Conference name not found' };
+  }
+  
+  console.log(`[sip-webhook] 📞 Adding human to conference: ${conferenceName}`);
+  console.log(`[sip-webhook] 📞 Caller ID: ${callerID}`);
+  console.log(`[sip-webhook] 📞 Call Token: ${callToken ? 'SET' : 'NOT SET'}`);
+  
+  const twilioAccountSid = process.env.TWILIO_ACCOUNT_SID;
+  const twilioAuthToken = process.env.TWILIO_AUTH_TOKEN;
+  const staffPhone = process.env.STAFF_PHONE_NUMBER;
+  
+  if (!twilioAccountSid || !twilioAuthToken || !staffPhone) {
+    console.error(`[sip-webhook] ❌ Missing Twilio credentials or staff phone`);
+    return { success: false, error: 'Missing credentials' };
+  }
+  
+  try {
+    // Add human agent to the existing conference
+    const participantResponse = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${twilioAccountSid}/Conferences/${encodeURIComponent(conferenceName)}/Participants.json`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Basic ${Buffer.from(`${twilioAccountSid}:${twilioAuthToken}`).toString('base64')}`,
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      body: new URLSearchParams({
+        From: callerID || process.env.TWILIO_PHONE_NUMBER,
+        To: staffPhone,
+        Label: 'human agent',
+        EarlyMedia: 'false',
+        ...(callToken && { CallToken: callToken })
+      })
+    });
+    
+    if (!participantResponse.ok) {
+      const errorText = await participantResponse.text();
+      console.error(`[sip-webhook] ❌ Failed to add human to conference: ${participantResponse.status} ${errorText}`);
+      return { success: false, error: `Failed to add human: ${participantResponse.status}` };
+    }
+    
+    const participantData = await participantResponse.json();
+    console.log(`[sip-webhook] ✅ Human agent added to conference: ${participantData.call_sid}`);
+    
+    // Store transfer info for cleanup
+    if (!global.pendingTransfers) {
+      global.pendingTransfers = new Map();
+    }
+    
+    global.pendingTransfers.set(callId, {
+      conferenceName,
+      staffPhone,
+      staffCallSid: participantData.call_sid,
+      timestamp: Date.now(),
+      staffConnected: true
+    });
+    
+    return {
+      success: true,
+      staff_call_sid: participantData.call_sid,
+      conference_name: conferenceName,
+      transfer_method: 'conference_participant'
+    };
+    
+  } catch (error) {
+    console.error(`[sip-webhook] ❌ Error adding human to conference: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+}
+
 // Unified instructions are now loaded from shared file
 
 // Tool definitions
@@ -409,6 +676,352 @@ const FANCITA_HANGUP_TOOL = {
 
 // HTTP server for webhook
 const server = http.createServer(async (req, res) => {
+  const url = new URL(req.url, `http://${req.headers.host}`);
+  
+  // Handle TwiML endpoints for staff transfer
+  if (url.pathname === '/staff-direct-twiml' && req.method === 'GET') {
+    const callId = url.searchParams.get('callId');
+    const summary = url.searchParams.get('summary') || 'Poziv iz restorana Fančita.';
+    
+    const twiml = `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+    <Say voice="alice" language="en-US">${summary}</Say>
+    <Gather numDigits="1" timeout="30" action="${process.env.WEBHOOK_BASE_URL || 'https://fancita-webhook.loca.lt'}/staff-connect?callId=${encodeURIComponent(callId)}" method="POST">
+        <Say voice="alice" language="en-US">Press any key to connect with the guest.</Say>
+    </Gather>
+    <Say voice="alice" language="en-US">No response. Call ending.</Say>
+    <Hangup/>
+</Response>`;
+    
+    res.writeHead(200, { 'Content-Type': 'text/xml' });
+    res.end(twiml);
+    console.log(`[sip-webhook] 📞 Staff direct TwiML served for call: ${callId}`);
+    return;
+  }
+  
+  if (url.pathname === '/staff-connect' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', () => {
+      const params = new URLSearchParams(body);
+      const staffCallSid = params.get('CallSid');
+      const callId = url.searchParams.get('callId');
+      
+      console.log(`[sip-webhook] 📞 Staff pressed key for call: ${callId}, staff call: ${staffCallSid}`);
+      
+      const transferInfo = global.pendingTransfers?.get(callId);
+      if (transferInfo) {
+        console.log(`[sip-webhook] 📞 Found transfer info:`, transferInfo);
+        
+        const conferenceId = `transfer_${callId.replace('rtc_', '')}_${Date.now()}`;
+        
+        const twiml = `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+    <Say voice="alice" language="en-US">Connecting you with the guest. Please wait.</Say>
+    <Dial>
+        <Conference startConferenceOnEnter="true" endConferenceOnExit="true">${conferenceId}</Conference>
+    </Dial>
+</Response>`;
+        
+        res.writeHead(200, { 'Content-Type': 'text/xml' });
+        res.end(twiml);
+        console.log(`[sip-webhook] 📞 Staff joining conference: ${conferenceId}`);
+        
+        // Store conference info and close OpenAI session
+        setTimeout(async () => {
+          try {
+            console.log(`[sip-webhook] 📞 Attempting to end OpenAI session for guest redirect...`);
+            
+            global.pendingTransfers.set(callId, {
+              ...transferInfo,
+              conferenceId: conferenceId,
+              staffConnected: true
+            });
+            
+            const ws = global.activeSessions?.get(callId);
+            if (ws && ws.readyState === 1) {
+              console.log(`[sip-webhook] 📞 Closing OpenAI WebSocket for ${callId}`);
+              ws.close();
+            }
+          } catch (error) {
+            console.error(`[sip-webhook] ❌ Error handling staff connect:`, error);
+          }
+        }, 1000);
+        
+      } else {
+        console.error(`[sip-webhook] ❌ No transfer info found for call: ${callId}`);
+        
+        const twiml = `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+    <Say voice="alice" language="hr-HR">Greška pri povezivanju. Poziv se završava.</Say>
+    <Hangup/>
+</Response>`;
+        
+        res.writeHead(200, { 'Content-Type': 'text/xml' });
+        res.end(twiml);
+      }
+    });
+    return;
+  }
+  
+  // Staff callback TwiML - plays summary and waits for keypress
+  if (url.pathname === '/staff-callback-twiml' && req.method === 'GET') {
+    const callId = url.searchParams.get('callId');
+    const conferenceName = url.searchParams.get('conferenceName');
+    
+    if (!callId || !conferenceName) {
+      res.writeHead(400);
+      res.end('Missing callId or conferenceName parameter');
+      return;
+    }
+    
+    const callbackInfo = global.pendingCallbacks?.get(callId);
+    const problemSummary = callbackInfo?.problemSummary || 'Customer requested to speak with staff';
+    
+    console.log(`[sip-webhook] 📞 Staff callback TwiML served for ${callId}`);
+    
+    const twiml = `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+    <Say voice="alice" language="en-US">Hello, this is Fancita restaurant. A customer needs assistance. Problem summary: ${problemSummary.replace(/[<>&"']/g, '')}. Press any key when ready to connect.</Say>
+    <Gather numDigits="1" timeout="30" action="${process.env.WEBHOOK_BASE_URL || 'https://fancita-webhook.loca.lt'}/staff-ready?callId=${encodeURIComponent(callId)}&amp;conferenceName=${encodeURIComponent(conferenceName)}" method="POST">
+        <Say voice="alice" language="en-US">Press any key to connect with the customer.</Say>
+    </Gather>
+    <Say voice="alice" language="en-US">No response received. Hanging up.</Say>
+    <Hangup/>
+</Response>`;
+    
+    res.writeHead(200, { 'Content-Type': 'text/xml' });
+    res.end(twiml);
+    return;
+  }
+  
+  // Staff ready - staff pressed key, now call guest
+  if (url.pathname === '/staff-ready' && req.method === 'POST') {
+    // Get parameters from URL query string (Twilio sends them there)
+    const callId = url.searchParams.get('callId');
+    const conferenceName = url.searchParams.get('conferenceName');
+    
+    console.log(`[sip-webhook] 🔧 DEBUG: URL params - callId: ${callId}, conferenceName: ${conferenceName}`);
+    
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', async () => {
+      try {
+        console.log(`[sip-webhook] 🔧 DEBUG: Staff ready body:`, body);
+        console.log(`[sip-webhook] 📞 Staff ready for ${callId}, calling guest now`);
+        
+        if (!callId || !conferenceName) {
+          console.error(`[sip-webhook] ❌ Missing callId or conferenceName in staff-ready`);
+          res.writeHead(400);
+          res.end('Missing parameters');
+          return;
+        }
+        
+        const callbackInfo = global.pendingCallbacks?.get(callId);
+        if (callbackInfo) {
+          callbackInfo.status = 'staff_ready';
+          global.pendingCallbacks.set(callId, callbackInfo);
+          
+          // Put staff in conference first
+          const staffConferenceTwiml = `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+    <Say voice="alice" language="en-US">Connecting you with the customer now.</Say>
+    <Dial>
+        <Conference statusCallback="${process.env.WEBHOOK_BASE_URL || 'https://fancita-webhook.loca.lt'}/conference-events" statusCallbackEvent="join,leave" statusCallbackMethod="POST">${conferenceName}</Conference>
+    </Dial>
+</Response>`;
+          
+          res.writeHead(200, { 'Content-Type': 'text/xml' });
+          res.end(staffConferenceTwiml);
+          
+          // Now call guest to join conference
+          setTimeout(() => callGuestToConference(callId, conferenceName), 1000);
+        } else {
+          res.writeHead(404);
+          res.end('Callback info not found');
+        }
+      } catch (error) {
+        console.error(`[sip-webhook] ❌ Error in staff-ready:`, error);
+        res.writeHead(500);
+        res.end('Internal Server Error');
+      }
+    });
+    return;
+  }
+  
+  // Staff callback status - monitor staff call status
+  if (url.pathname === '/staff-callback-status' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', () => {
+      try {
+        const params = new URLSearchParams(body);
+        const callStatus = params.get('CallStatus');
+        const callSid = params.get('CallSid');
+        
+        console.log(`[sip-webhook] 📞 Staff callback status: ${callStatus} for ${callSid}`);
+        
+        res.writeHead(200);
+        res.end('OK');
+      } catch (error) {
+        console.error(`[sip-webhook] ❌ Error processing staff callback status:`, error);
+        res.writeHead(500);
+        res.end('Internal Server Error');
+      }
+    });
+    return;
+  }
+
+  if (url.pathname === '/guest-conference-twiml' && req.method === 'GET') {
+    // TwiML to redirect guest to conference
+    const conferenceId = url.searchParams.get('conferenceId');
+    
+    if (!conferenceId) {
+      res.writeHead(400);
+      res.end('Missing conferenceId');
+      return;
+    }
+    
+    const twiml = `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+    <Say voice="alice" language="en-US">Connecting you with our staff.</Say>
+    <Dial>
+        <Conference>${conferenceId}</Conference>
+    </Dial>
+    <Say voice="alice" language="en-US">Call ending.</Say>
+    <Hangup/>
+</Response>`;
+    
+    res.writeHead(200, { 'Content-Type': 'text/xml' });
+    res.end(twiml);
+    console.log(`[sip-webhook] 📞 Guest conference TwiML served for conference: ${conferenceId}`);
+    return;
+  }
+  
+  if (url.pathname === '/call-status' && req.method === 'POST') {
+    // Twilio call status callback
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', () => {
+      const params = new URLSearchParams(body);
+      const callSid = params.get('CallSid');
+      const callStatus = params.get('CallStatus');
+      const from = params.get('From');
+      const to = params.get('To');
+      
+      console.log(`[sip-webhook] 📞 Call ${callSid} status: ${callStatus}, from: ${from}, to: ${to}`);
+      
+      // If this is an incoming call to our Twilio number, try to map it to OpenAI call
+      if (callStatus === 'in-progress' && to === process.env.TWILIO_PHONE_NUMBER) {
+        // Find the most recent OpenAI call that doesn't have a Twilio call SID yet
+        if (global.callSidMapping) {
+          for (const [openaiCallId, storedCallSid] of global.callSidMapping.entries()) {
+            if (storedCallSid === null || storedCallSid === undefined) {
+              console.log(`[sip-webhook] 📞 Mapping Twilio call ${callSid} to OpenAI call ${openaiCallId}`);
+              global.callSidMapping.set(openaiCallId, callSid);
+              break;
+            }
+          }
+        }
+      }
+      
+      res.writeHead(200, { 'Content-Type': 'text/plain' });
+      res.end('OK');
+    });
+    return;
+  }
+  
+  if (url.pathname === '/conference-events' && req.method === 'POST') {
+    // Conference events callback (following Twilio tutorial)
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', async () => {
+      const params = new URLSearchParams(body);
+      const participantLabel = params.get('ParticipantLabel');
+      const statusCallbackEvent = params.get('StatusCallbackEvent');
+      const conferenceSid = params.get('ConferenceSid');
+      const callSid = params.get('CallSid');
+      
+      console.log(`[sip-webhook] 🏗️ Conference event: ${statusCallbackEvent}, participant: ${participantLabel}, conference: ${conferenceSid}`);
+      
+      // When human agent joins, remove AI agent
+      if (participantLabel === 'human agent' && statusCallbackEvent === 'participant-join') {
+        console.log(`[sip-webhook] 🤖 Human agent joined, removing AI agent from conference`);
+        
+        try {
+          const twilioAccountSid = process.env.TWILIO_ACCOUNT_SID;
+          const twilioAuthToken = process.env.TWILIO_AUTH_TOKEN;
+          
+          if (!twilioAccountSid || !twilioAuthToken) {
+            console.error(`[sip-webhook] ❌ Missing Twilio credentials for participant removal`);
+            res.writeHead(200, { 'Content-Type': 'text/plain' });
+            res.end('OK');
+            return;
+          }
+          
+          // List all participants in the conference
+          const participantsResponse = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${twilioAccountSid}/Conferences/${conferenceSid}/Participants.json`, {
+            method: 'GET',
+            headers: {
+              'Authorization': `Basic ${Buffer.from(`${twilioAccountSid}:${twilioAuthToken}`).toString('base64')}`
+            }
+          });
+          
+          if (participantsResponse.ok) {
+            const participantsData = await participantsResponse.json();
+            console.log(`[sip-webhook] 📋 Found ${participantsData.participants.length} participants in conference`);
+            
+            // Find and remove virtual agent
+            for (const participant of participantsData.participants) {
+              if (participant.label === 'virtual agent') {
+                console.log(`[sip-webhook] 🤖 Removing AI agent: ${participant.call_sid}`);
+                
+                // End the AI agent's call
+                const removeResponse = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${twilioAccountSid}/Calls/${participant.call_sid}.json`, {
+                  method: 'POST',
+                  headers: {
+                    'Authorization': `Basic ${Buffer.from(`${twilioAccountSid}:${twilioAuthToken}`).toString('base64')}`,
+                    'Content-Type': 'application/x-www-form-urlencoded'
+                  },
+                  body: new URLSearchParams({
+                    Status: 'completed'
+                  })
+                });
+                
+                if (removeResponse.ok) {
+                  console.log(`[sip-webhook] ✅ AI agent removed successfully`);
+                  
+                  // Also close the OpenAI WebSocket session
+                  if (global.activeWebSockets) {
+                    for (const [callId, ws] of global.activeWebSockets.entries()) {
+                      const transferInfo = global.pendingTransfers?.get(callId);
+                      if (transferInfo && transferInfo.conferenceName === conferenceSid) {
+                        console.log(`[sip-webhook] 🔚 Closing OpenAI session for transferred call: ${callId}`);
+                        ws.close();
+                        global.pendingTransfers.delete(callId);
+                        break;
+                      }
+                    }
+                  }
+                } else {
+                  console.error(`[sip-webhook] ❌ Failed to remove AI agent: ${removeResponse.status}`);
+                }
+              }
+            }
+          } else {
+            console.error(`[sip-webhook] ❌ Failed to list conference participants: ${participantsResponse.status}`);
+          }
+        } catch (error) {
+          console.error(`[sip-webhook] ❌ Error handling conference event: ${error.message}`);
+        }
+      }
+      
+      res.writeHead(200, { 'Content-Type': 'text/plain' });
+      res.end('OK');
+    });
+    return;
+  }
+  
   if (req.method !== 'POST' || req.url !== '/webhook') {
     res.writeHead(404);
     res.end('Not Found');
@@ -443,12 +1056,71 @@ const server = http.createServer(async (req, res) => {
         res.end(JSON.stringify({ status: 'already_accepted' }));
         return;
       }
+      
+      // Check if this is a guest redirect to conference after staff transfer
+      const transferInfo = global.pendingTransfers?.get(callId);
+      console.log(`[sip-webhook] 🔍 Checking transfer info for ${callId}:`, transferInfo);
+      
+      if (transferInfo && transferInfo.staffConnected && transferInfo.conferenceId) {
+        console.log(`[sip-webhook] 📞 Redirecting guest to conference: ${transferInfo.conferenceId}`);
+        
+        const twiml = `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+    <Say voice="alice" language="en-US">Connecting you with our staff.</Say>
+    <Dial>
+        <Conference>${transferInfo.conferenceId}</Conference>
+    </Dial>
+    <Say voice="alice" language="en-US">Call ending.</Say>
+    <Hangup/>
+</Response>`;
+        
+        res.writeHead(200, { 'Content-Type': 'text/xml' });
+        res.end(twiml);
+        
+        // Clean up transfer info
+        global.pendingTransfers.delete(callId);
+        console.log(`[sip-webhook] 📞 Guest redirected to conference, transfer completed`);
+        return;
+      }
 
       // Extract caller info
       const callerFrom = event?.data?.sip_headers?.find(h => h.name === 'From')?.value || 'unknown';
       const callerPhone = callerFrom.includes('+') ? callerFrom : '+' + callerFrom.match(/\d+/)?.[0] || callerFrom;
+      
+      // Extract Twilio call SID from the event - try multiple possible locations
+      const twilioCallSid = event?.data?.call_sid || event?.call_sid || event?.data?.sip_headers?.find(h => h.name === 'Call-ID')?.value || null;
+      console.log(`[sip-webhook] 📞 Twilio call SID: ${twilioCallSid}`);
+      
+      // Store Twilio call SID for potential staff transfer
+      if (!global.callSidMapping) {
+        global.callSidMapping = new Map();
+      }
+      
+      if (twilioCallSid) {
+        global.callSidMapping.set(callId, twilioCallSid);
+        console.log(`[sip-webhook] 📞 Stored call mapping: ${callId} -> ${twilioCallSid}`);
+      } else {
+        // Store placeholder - will be updated by status callback
+        global.callSidMapping.set(callId, null);
+        console.log(`[sip-webhook] 📞 Stored placeholder mapping for ${callId}, waiting for status callback`);
+      }
 
-      // Accept the call
+      // Conference-based approach: Create conference and add participants
+      const conferenceName = `transfer_${callId}_${Date.now()}`;
+      
+      // Store conference mappings
+      global.callIDtoConferenceNameMapping[callId] = conferenceName;
+      global.ConferenceNametoCallerIDMapping[conferenceName] = callerPhone;
+      // Note: CallToken will be extracted from OpenAI webhook if available
+      
+      console.log(`[sip-webhook] 🏗️ Creating conference: ${conferenceName}`);
+      console.log(`[sip-webhook] 📞 Mapping ${callId} -> ${conferenceName}`);
+      
+      // IMPORTANT: For true warm transfer, we need to immediately redirect this call to conference
+      // and add AI agent as a participant, but OpenAI Realtime doesn't support this directly
+      console.log(`[sip-webhook] ⚠️ Note: Current implementation uses hybrid approach - AI direct + staff conference`);
+      
+      // Accept the call first
       const acceptUrl = `https://api.openai.com/v1/realtime/calls/${encodeURIComponent(callId)}/accept`;
       const sharedInstructions = FANCITA_UNIFIED_INSTRUCTIONS();
       const instructions = sharedReplaceVariables(sharedInstructions, callerFrom, callId);
@@ -468,6 +1140,8 @@ const server = http.createServer(async (req, res) => {
       };
 
       console.log('[sip-webhook] 🔄 Accepting call:', callId);
+      console.log('[sip-webhook] 🔄 Accept URL:', acceptUrl);
+      console.log('[sip-webhook] 🔄 Accept payload:', JSON.stringify(acceptPayload, null, 2));
 
       const resAccept = await fetch(acceptUrl, {
         method: 'POST',
@@ -479,12 +1153,18 @@ const server = http.createServer(async (req, res) => {
         body: JSON.stringify(acceptPayload)
       });
 
+      console.log('[sip-webhook] 🔄 Accept response status:', resAccept.status);
+      
       if (!resAccept.ok) {
         const responseText = await resAccept.text();
         console.error('[sip-webhook] ❌ Accept failed:', resAccept.status, resAccept.statusText);
+        console.error('[sip-webhook] ❌ Accept response:', responseText);
         res.writeHead(500);
         res.end(JSON.stringify({ error: 'Accept failed' }));
         return;
+      } else {
+        const responseText = await resAccept.text();
+        console.log('[sip-webhook] ✅ Accept successful, response:', responseText);
       }
 
       acceptedCallIds.add(callId);
@@ -535,16 +1215,34 @@ async function processCall(callId, event, callerFrom, callerPhone) {
     // Add more detailed error handling and unexpected-response handler
     ws.on('unexpected-response', (request, response) => {
       console.log(`\n\n[SIP-WEBHOOK] ❌❌❌ WEBSOCKET ERROR: ${response.statusCode} ❌❌❌\n`);
+      console.log(`[SIP-WEBHOOK] ❌ Response headers:`, response.headers);
       // Try to read response body
       let body = '';
       response.on('data', (chunk) => { body += chunk; });
       response.on('end', () => {
         console.log(`\n[SIP-WEBHOOK] ❌❌❌ ERROR DETAILS: ${body} ❌❌❌\n`);
       });
-      });
+    });
+    
+    ws.on('error', (error) => {
+      console.error(`[SIP-WEBHOOK] ❌ WebSocket connection error:`, error);
+    });
+    
+    // Add timeout for connection
+    const connectionTimeout = setTimeout(() => {
+      console.error(`[SIP-WEBHOOK] ❌ WebSocket connection timeout after 10 seconds`);
+      ws.close();
+    }, 10000);
 
       ws.on('open', () => {
+        clearTimeout(connectionTimeout); // Clear the timeout
         console.log('\n\n[SIP-WEBHOOK] ✅✅✅ WEBSOCKET CONNECTED:', callId, '✅✅✅\n');
+        
+        // Store active session for later reference
+        if (!global.activeSessions) {
+          global.activeSessions = new Map();
+        }
+        global.activeSessions.set(callId, ws);
         
         // Initialize language tracking to Croatian
         callLanguages.set(callId, 'hr');
@@ -899,6 +1597,78 @@ async function processCall(callId, event, callerFrom, callerPhone) {
         pendingToolResults.delete(callId);
         pendingHangups.delete(callId);
         
+        // Remove from active sessions
+        if (global.activeSessions) {
+          global.activeSessions.delete(callId);
+        }
+        
+        // Check if this was a staff transfer - if so, redirect guest to conference
+        const transferInfo = global.pendingTransfers?.get(callId);
+        if (transferInfo && transferInfo.staffConnected && transferInfo.conferenceId) {
+          console.log(`[sip-webhook] 📞 OpenAI session ended, redirecting guest to conference: ${transferInfo.conferenceId}`);
+          
+          // Use Twilio API to redirect the guest call to conference
+          setTimeout(async () => {
+            try {
+              console.log(`[sip-webhook] 📞 Initiating guest callback to conference...`);
+              
+              // Get Twilio credentials
+              const twilioAccountSid = process.env.TWILIO_ACCOUNT_SID;
+              const twilioAuthToken = process.env.TWILIO_AUTH_TOKEN;
+              
+              if (!twilioAccountSid || !twilioAuthToken) {
+                console.error(`[sip-webhook] ❌ Missing Twilio credentials for callback`);
+                return;
+              }
+              
+              // Alternative approach: Call guest back to join conference
+              const twilioPhoneNumber = process.env.TWILIO_PHONE_NUMBER;
+              
+              if (!twilioPhoneNumber) {
+                console.error(`[sip-webhook] ❌ Missing TWILIO_PHONE_NUMBER for callback`);
+                return;
+              }
+              
+              console.log(`[sip-webhook] 📞 Calling guest back to join conference...`);
+              
+              // Call the guest back and connect them to the conference
+              const callbackResponse = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${twilioAccountSid}/Calls.json`, {
+                method: 'POST',
+                headers: {
+                  'Authorization': `Basic ${Buffer.from(`${twilioAccountSid}:${twilioAuthToken}`).toString('base64')}`,
+                  'Content-Type': 'application/x-www-form-urlencoded'
+                },
+                body: new URLSearchParams({
+                  From: twilioPhoneNumber,
+                  To: transferInfo.guestPhone,
+                  Url: `${process.env.WEBHOOK_BASE_URL || 'https://fancita-webhook.loca.lt'}/guest-conference-twiml?conferenceId=${encodeURIComponent(transferInfo.conferenceId)}`,
+                  Method: 'GET'
+                })
+              });
+              
+              if (callbackResponse.ok) {
+                const callData = await callbackResponse.json();
+                console.log(`[sip-webhook] ✅ Guest callback initiated: ${callData.sid}`);
+                console.log(`[sip-webhook] ✅ Guest will be connected to conference: ${transferInfo.conferenceId}`);
+                // Clean up transfer info and call mapping
+                global.pendingTransfers.delete(callId);
+                global.callSidMapping?.delete(callId);
+              } else {
+                const errorText = await callbackResponse.text();
+                console.error(`[sip-webhook] ❌ Failed to call guest back:`, callbackResponse.status, errorText);
+              }
+              
+            } catch (error) {
+              console.error(`[sip-webhook] ❌ Error redirecting guest to conference:`, error);
+            }
+          }, 2000); // Wait 2 seconds for staff to be in conference
+        } else {
+          // Clean up call mapping if no transfer
+          if (global.callSidMapping) {
+            global.callSidMapping.delete(callId);
+          }
+        }
+        
         logTranscriptEvent(callId, { 
           type: 'session_end', 
           sessionId: callId,
@@ -1008,14 +1778,118 @@ async function handleToolCall(ws, message, callerPhone, callId) {
         }
       }
     } else if (message.name === 'transfer_to_staff') {
-      // Simulate staff handoff
-      result = { success: true, message: 'Transfer initiated' };
+      // Real staff handoff - call staff and create conference
+      const args = JSON.parse(message.arguments);
+      const staffPhone = process.env.STAFF_PHONE_NUMBER;
+      
+      console.log(`[sip-webhook] 🔧 DEBUG: Staff transfer requested`);
+      console.log(`[sip-webhook] 🔧 DEBUG: STAFF_PHONE_NUMBER = ${staffPhone || 'NOT SET'}`);
+      console.log(`[sip-webhook] 🔧 DEBUG: TWILIO_ACCOUNT_SID = ${process.env.TWILIO_ACCOUNT_SID ? 'SET' : 'NOT SET'}`);
+      console.log(`[sip-webhook] 🔧 DEBUG: TWILIO_AUTH_TOKEN = ${process.env.TWILIO_AUTH_TOKEN ? 'SET' : 'NOT SET'}`);
+      console.log(`[sip-webhook] 🔧 DEBUG: TWILIO_PHONE_NUMBER = ${process.env.TWILIO_PHONE_NUMBER ? 'SET' : 'NOT SET'}`);
+      console.log(`[sip-webhook] 🔧 DEBUG: Problem summary = ${args.problem_summary}`);
+      
+      if (!staffPhone) {
+        console.log(`[sip-webhook] ❌ STAFF_PHONE_NUMBER not configured`);
+        result = { 
+          success: false, 
+          error: 'STAFF_PHONE_NUMBER not configured in environment' 
+        };
+      } else {
+        try {
+          console.log(`[sip-webhook] 📞 Scheduling staff callback for ${callId}`);
+          
+          // Extract guest phone from stored conference mapping
+          const conferenceName = global.callIDtoConferenceNameMapping[callId];
+          const guestPhone = global.ConferenceNametoCallerIDMapping[conferenceName] || '+38641734134';
+          
+          // Schedule staff callback (new approach - wait for staff to answer)
+          const conferenceResult = await scheduleStaffCallback(
+            callId, 
+            args.problem_summary,
+            guestPhone
+          );
+          
+          console.log(`[sip-webhook] 🔧 DEBUG: Conference result:`, conferenceResult);
+          
+          if (conferenceResult.success) {
+            result = { 
+              success: true, 
+              message: 'Staff callback scheduled successfully. You will be called back when staff is available.',
+              conference_name: conferenceResult.conference_name,
+              callback_scheduled: true
+            };
+            
+            // Log the transfer
+            logTranscriptEvent(callId, {
+              type: 'staff_transfer',
+              staff_phone: staffPhone,
+              problem_summary: args.problem_summary,
+              conference_sid: conferenceResult.conference_sid,
+              timestamp: new Date().toISOString(),
+              metadata: {
+                transferInitiated: true,
+                staffNumber: staffPhone,
+                guestNumber: callerPhone
+              }
+            });
+          } else {
+            console.log(`[sip-webhook] ❌ Conference creation failed:`, conferenceResult.error);
+            result = { 
+              success: false, 
+              error: `Staff transfer failed: ${conferenceResult.error}` 
+            };
+          }
+        } catch (error) {
+          console.error('[sip-webhook] ❌ Staff transfer error:', error);
+          result = { 
+            success: false, 
+            error: `Staff transfer error: ${error.message}` 
+          };
+        }
+      }
     } else if (message.name === 'end_call') {
       // Handle call termination - DO NOT send result back to avoid Maja saying it
       const args = JSON.parse(message.arguments);
       console.log(`[sip-webhook] 📞 Agent requested call end: ${args.reason}`);
       
-      // Immediate hangup without sending tool result to Maja
+      // Check if this is a callback_scheduled end_call - allow it
+      if (args.reason === 'callback_scheduled') {
+        console.log(`[sip-webhook] 📞 Callback scheduled - allowing call termination`);
+        // Continue with normal call termination
+      } else {
+        // Check if there's a pending staff transfer - if so, don't end the call
+        const transferInfo = global.pendingTransfers?.get(callId);
+        if (transferInfo && transferInfo.staffConnected) {
+          console.log(`[sip-webhook] ⚠️ Staff transfer in progress, keeping guest connected`);
+          console.log(`[sip-webhook] 📞 Waiting for staff to join conference: ${transferInfo.conferenceName}`);
+          
+          // Send a message to Maja to keep talking to the guest
+          const keepTalkingMessage = {
+            type: 'conversation.item.create',
+            item: {
+              type: 'message',
+              role: 'system',
+              content: [{
+                type: 'text',
+                text: 'SYSTEM: Staff transfer initiated. Keep the guest engaged while waiting for staff to join. Do not end the call.'
+              }]
+            }
+          };
+          
+          // Send to OpenAI to keep Maja active
+          if (global.activeWebSockets && global.activeWebSockets.has(callId)) {
+            const ws = global.activeWebSockets.get(callId);
+            ws.send(JSON.stringify(keepTalkingMessage));
+            ws.send(JSON.stringify({ type: 'response.create' }));
+          }
+          
+          // Don't hang up - keep guest connected
+          return;
+        }
+      }
+      
+      // Normal call termination
       console.log('[sip-webhook] 📞 Agent-initiated hangup (immediate)');
       
       try {
@@ -1106,7 +1980,71 @@ async function handleToolCall(ws, message, callerPhone, callId) {
   }
 }
 
+
 server.listen(PORT, () => {
   console.log(`[sip-webhook] 🚀 Pure Node.js SIP webhook server listening on port ${PORT}`);
   console.log(`[sip-webhook] 🔗 Configure Twilio webhook to: http://your-domain:${PORT}/webhook`);
+  console.log(`[sip-webhook] 📞 Staff transfer endpoints available (hybrid conference mode):`);
+  console.log(`[sip-webhook]   - /staff-callback-twiml (staff callback with summary)`);
+  console.log(`[sip-webhook]   - /staff-ready (staff keypress handler)`);
+  console.log(`[sip-webhook]   - /staff-callback-status (staff call status)`);
+  console.log(`[sip-webhook]   - /guest-conference-twiml (guest redirect to conference)`);
+  console.log(`[sip-webhook]   - /call-status (call status callbacks)`);
+  console.log(`[sip-webhook]   - /conference-events (conference participant events)`);
 });
+
+// Call guest to join conference after staff is ready
+async function callGuestToConference(callId, conferenceName) {
+  console.log(`[sip-webhook] 📞 Calling guest to join conference: ${conferenceName}`);
+  
+  const callbackInfo = global.pendingCallbacks?.get(callId);
+  if (!callbackInfo) {
+    console.error(`[sip-webhook] ❌ No callback info found for ${callId}`);
+    return;
+  }
+  
+  const twilioAccountSid = process.env.TWILIO_ACCOUNT_SID;
+  const twilioAuthToken = process.env.TWILIO_AUTH_TOKEN;
+  const twilioPhoneNumber = process.env.TWILIO_PHONE_NUMBER;
+  
+  try {
+    const guestCallResponse = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${twilioAccountSid}/Calls.json`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Basic ${Buffer.from(`${twilioAccountSid}:${twilioAuthToken}`).toString('base64')}`,
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      body: new URLSearchParams({
+        From: twilioPhoneNumber,
+        To: callbackInfo.guestPhone,
+        Url: `${process.env.WEBHOOK_BASE_URL || 'https://fancita-webhook.loca.lt'}/guest-conference-twiml?conferenceId=${encodeURIComponent(conferenceName)}`,
+        Method: 'GET'
+      })
+    });
+    
+    if (guestCallResponse.ok) {
+      const guestCallData = await guestCallResponse.json();
+      console.log(`[sip-webhook] ✅ Guest callback initiated: ${guestCallData.sid}`);
+      
+      // Update callback status
+      callbackInfo.status = 'guest_called';
+      callbackInfo.guestCallSid = guestCallData.sid;
+      global.pendingCallbacks.set(callId, callbackInfo);
+      
+      // Log successful callback
+      logTranscriptEvent(callId, {
+        type: 'guest_callback',
+        guest_phone: callbackInfo.guestPhone,
+        conference_name: conferenceName,
+        timestamp: new Date().toISOString()
+      });
+      
+    } else {
+      const errorText = await guestCallResponse.text();
+      console.error(`[sip-webhook] ❌ Failed to call guest: ${guestCallResponse.status} ${errorText}`);
+    }
+    
+  } catch (error) {
+    console.error(`[sip-webhook] ❌ Error calling guest to conference: ${error.message}`);
+  }
+}

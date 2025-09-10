@@ -55,8 +55,8 @@ export const FANCITA_UNIFIED_INSTRUCTIONS = `# Fančita Restaurant Agent - Poeno
 
 ## 4) Handoff k osebju
 Če želi govoriti z osebjem ali se ne razumeta:
-- Povej v jeziku uporabnika: "Spojim vas s kolegom iz Fančite. Samo trenutak."
-- **POČAKAJ 3 s**, nato pokliči tool **transfer_to_staff**
+- Povej v jeziku uporabnika: "Razumijem da želite razgovarati s osobljem."
+- **TAKOJ** pokliči tool **transfer_to_staff**
 - Sporoči osebju problem v hrvaščini
 - Poveži gosta
 
@@ -204,10 +204,25 @@ Vprašaj samo za manjkajoče podatke v tem vrstnem redu:
 
 ## 8) Tok: HANDOFF
 **VEDNO ko gost želi govoriti z osebjem:**
-1. **POVZEMI PROBLEM** - "Razumem da imate problem z [kratko opiši]"
-2. **POKLIČI OSEBJE** - Uporabi tool transfer_to_staff
-3. **SPOROČI OSEBJU** - "Zdravo, imam gosta na liniji z naslednjim problemom: [povzemi]. Lahko ga povežem?"
-4. **POVEŽI GOSTA** - "Povezujem vas z našim osebjem. Trenutak prosim."
+1. **POVZEMI PROBLEM** - "Razumijem da želite razgovarati s osobljem."
+2. **POKLIČI TOOL** - Takoj pokliči tool transfer_to_staff s povzetkom problema
+3. **NAJAVI CALLBACK** - "Naše osebje vas bo poklicalo nazaj takoj, ko bo kdo na voljo. Hvala na razumevanju."
+4. **KONČAJ KLIC** - Takoj pokliči end_call z razlogom "callback_scheduled"
+
+**POMEMBNO**: Ko pokličeš transfer_to_staff tool, sistem avtomatsko:
+- Pokliče osebje na STAFF_PHONE_NUMBER
+- Pove povzetek problema v hrvaščini
+- Vzpostavi konferenco za osebje
+- Pokliče gosta nazaj in ga poveže z osebjem
+- Maja se odklopi iz celotnega procesa
+
+**CALLBACK SPOROČILA po jezikih:**
+- HR: "Naše osebje će vas pozvati takoj kad bude dostupno. Hvala na razumijevanju."
+- SL: "Naše osebje vas bo poklicalo takoj, ko bo kdo na voljo. Hvala za razumevanje."
+- EN: "Our staff will call you back as soon as someone is available. Thank you for your understanding."
+- DE: "Unser Personal wird Sie zurückrufen, sobald jemand verfügbar ist. Vielen Dank für Ihr Verständnis."
+- IT: "Il nostro staff la richiamerà non appena qualcuno sarà disponibile. Grazie per la comprensione."
+- NL: "Ons personeel belt u terug zodra iemand beschikbaar is. Dank voor uw begrip."
 
 ## 9) Validacije
 - location ∈ {vrt, terasa, unutra} (male črke)
