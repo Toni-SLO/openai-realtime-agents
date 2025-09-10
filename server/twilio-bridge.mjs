@@ -1,16 +1,27 @@
 import 'dotenv/config';
+import { config } from 'dotenv';
+
+// Load .env.local explicitly for development
+config({ path: '../.env.local' });
 import http from 'http';
 import { WebSocketServer } from 'ws';
 import { RealtimeSession } from '@openai/agents-realtime';
 
-// NOTE: We load TS agent configs via ts-node loader (see package.json script)
-import restoranPkg from '../src/app/agentConfigs/restoran/unified.ts';
-const { unifiedRestoranAgent } = restoranPkg;
+// NOTE: We load TS agent configs via tsx
+import { unifiedRestoranAgent } from '../src/app/agentConfigs/restoran/unified.ts';
 
 const PORT = parseInt(process.env.BRIDGE_PORT || '3001', 10);
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
 const OPENAI_REALTIME_MODEL = process.env.OPENAI_REALTIME_MODEL || 'gpt-realtime';
 const OPENAI_VOICE = process.env.OPENAI_REALTIME_VOICE || 'marin';
+
+// Log MCP configuration
+console.log('[bridge] MCP_SERVER_URL:', process.env.MCP_SERVER_URL ? 'SET' : 'NOT SET');
+if (process.env.MCP_SERVER_URL) {
+  console.log('[bridge] Using native MCP integration');
+} else {
+  console.log('[bridge] Using fallback webhook mode');
+}
 
 const server = http.createServer();
 const wss = new WebSocketServer({ server });
@@ -153,17 +164,25 @@ wss.on('connection', (ws, req) => {
           try { console.log('[bridge][agents] asr', ev.delta); } catch {}
         }); } catch {}
 
-        await session.connect({
-          apiKey: OPENAI_API_KEY,
-          initialSessionConfig: {
-            voice: OPENAI_VOICE,
-            modalities: ['text', 'audio'],
-            inputAudioFormat: g711Format,
-            outputAudioFormat: g711Format,
-            inputAudioTranscription: { model: 'gpt-4o-mini-transcribe', language: 'hr' }, // TODO: Add dynamic language detection
-            turnDetection: { type: 'semantic_vad' },
-          },
-        });
+        await session.connect({ apiKey: OPENAI_API_KEY });
+
+        // Nastavi sejo na realtime in konfiguriraj audio formate
+        try {
+          session.transport.sendEvent({
+            type: 'session.update',
+            session: {
+              type: 'realtime',
+              voice: OPENAI_VOICE,
+              modalities: ['text', 'audio'],
+              input_audio_format: g711Format,
+              output_audio_format: g711Format,
+              input_audio_transcription: { model: 'gpt-4o-mini-transcribe', language: 'hr' },
+              turn_detection: { type: 'server_vad', threshold: 0.5, prefix_padding_ms: 300, silence_duration_ms: 200 },
+            },
+          });
+        } catch (e) {
+          console.warn('[bridge][agents] session.update failed', e);
+        }
 
         // Pozdrav greeterja (brez dodatnih navodil) – sproži prvo repliko
         try { session.transport.sendEvent({ type: 'response.create' }); } catch {}

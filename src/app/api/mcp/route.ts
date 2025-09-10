@@ -404,15 +404,15 @@ export async function POST(request: NextRequest) {
     if (mcpClient || process.env.MCP_SERVER_URL) {
       // Quick check for MCP initialization - don't wait long
       if (!mcpClient && process.env.MCP_SERVER_URL) {
-        console.log('⏳ Quick check for MCP client...');
+        console.log('⏳ Waiting for MCP client to be ready...');
         let attempts = 0;
-        while (!mcpClient && attempts < 2) { // Wait max 1 second
+        // wait up to ~5s (10 * 500ms) for MCP to come up on cold start
+        while (!mcpClient && attempts < 10) {
           await new Promise(resolve => setTimeout(resolve, 500));
           attempts++;
         }
-        
         if (!mcpClient) {
-          console.log('⚠️ MCP client not ready after 1s, using webhook fallback for speed');
+          console.log('⚠️ MCP client not ready after 5s, using webhook fallback');
         }
       }
       

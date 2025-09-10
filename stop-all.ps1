@@ -14,7 +14,7 @@ try {
 
 Write-Host ""
 Write-Host "[2/3] Prisilna ustavitev procesov na portih..." -ForegroundColor Yellow
-$ports = @(3000, 3002, 3003)
+$ports = @(3000, 3001, 3002, 3003)
 foreach ($port in $ports) {
     $connections = Get-NetTCPConnection -LocalPort $port -ErrorAction SilentlyContinue
     if ($connections) {
@@ -43,6 +43,7 @@ Write-Host "[3/3] Preverjam porte..." -ForegroundColor Yellow
 
 $ports = @(
     @{Port=3000; Name="Web App"},
+    @{Port=3001; Name="SIP Bridge"},
     @{Port=3002; Name="Transcript Bridge"}, 
     @{Port=3003; Name="SIP Webhook"}
 )

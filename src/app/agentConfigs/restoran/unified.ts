@@ -43,16 +43,33 @@ export const unifiedRestoranAgent = new RealtimeAgent({
             source_id: conversationId,
           };
 
-          // Call MCP system
-          const url = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
-          const response = await fetch(`${url}/api/mcp`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              action: 's6792596_fancita_rezervation_supabase',
-              data: reservationData
-            })
-          });
+          // Call MCP system - try direct webhook first for SIP context
+          let response;
+          try {
+            // Try direct webhook for SIP bridge context
+            if (process.env.MAKE_WEBHOOK_RESERVATION) {
+              console.log('[unified-agent] Using direct webhook for SIP context');
+              response = await fetch(process.env.MAKE_WEBHOOK_RESERVATION, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(reservationData)
+              });
+            } else {
+              // Fallback to MCP API endpoint for web context
+              const url = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
+              response = await fetch(`${url}/api/mcp`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  action: 's6792596_fancita_rezervation_supabase',
+                  data: reservationData
+                })
+              });
+            }
+          } catch (fetchError) {
+            console.error('[unified-agent] Fetch failed:', fetchError);
+            throw new Error('Network error during reservation');
+          }
 
           const result = await response.json();
           console.log('[unified-agent] MCP reservation result:', result);
@@ -121,16 +138,33 @@ export const unifiedRestoranAgent = new RealtimeAgent({
             source_id: conversationId,
           };
 
-          // Call MCP system
-          const url = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
-          const response = await fetch(`${url}/api/mcp`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              action: 's6798488_fancita_order_supabase',
-              data: orderData
-            })
-          });
+          // Call MCP system - try direct webhook first for SIP context
+          let response;
+          try {
+            // Try direct webhook for SIP bridge context
+            if (process.env.MAKE_WEBHOOK_ORDER) {
+              console.log('[unified-agent] Using direct webhook for SIP context (order)');
+              response = await fetch(process.env.MAKE_WEBHOOK_ORDER, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(orderData)
+              });
+            } else {
+              // Fallback to MCP API endpoint for web context
+              const url = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
+              response = await fetch(`${url}/api/mcp`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  action: 's6798488_fancita_order_supabase',
+                  data: orderData
+                })
+              });
+            }
+          } catch (fetchError) {
+            console.error('[unified-agent] Order fetch failed:', fetchError);
+            throw new Error('Network error during order');
+          }
 
           const result = await response.json();
           console.log('[unified-agent] MCP order result:', result);

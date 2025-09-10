@@ -157,7 +157,8 @@ Vprašaj samo za manjkajoče podatke v tem vrstnem redu:
 - IT: "Ho capito: [date], [time], [guests_number] persone, nome [name], posizione [location]. È corretto?"
 - ES: "Entiendo: [date], [time], [guests_number] personas, nombre [name], ubicación [location]. ¿Es correcto?"
 
-- Če potrdi → **TAKOJ kliči tool s6792596_fancita_rezervation_supabase**
+- **KRITIČNO**: Če uporabnik odgovori z DA besedami (točno, da, yes, correct, etc.) → **TAKOJ kliči tool s6792596_fancita_rezervation_supabase**
+- **NE ČAKAJ** na dodatne potrditve ali ponavljanje vprašanja
 - Po uspehu: "Rezervacija je zavedena. Vidimo se u Fančiti." (prilagodi jeziku)
 
 ## 7) Tok: ORDER

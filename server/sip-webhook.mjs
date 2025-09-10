@@ -104,6 +104,10 @@ console.log(`[sip-webhook] 🏗️  Project ID: ${OPENAI_PROJECT_ID || 'MISSING'
 console.log(`[sip-webhook] 🏗️  Project ID raw: ${process.env.OPENAI_PROJECT_ID || 'NOT_FOUND'}`);
 console.log(`[sip-webhook] 🤖 Model: ${MODEL}`);
 console.log(`[sip-webhook] 📧 Email: ${process.env.URGENT_ERROR_EMAIL || 'NOT_SET'}`);
+console.log(`[sip-webhook] 🔗 MCP_SERVER_URL: ${process.env.MCP_SERVER_URL ? 'SET' : 'NOT SET'}`);
+if (process.env.MCP_SERVER_URL) {
+  console.log(`[sip-webhook] 🔗 MCP URL FULL: ${process.env.MCP_SERVER_URL}`);
+}
 
 const VOICE = process.env.OPENAI_REALTIME_VOICE || 'marin';
 // Use G.711 μ-law for guaranteed SIP compatibility
@@ -412,13 +416,7 @@ const server = http.createServer(async (req, res) => {
   req.on('data', chunk => { body += chunk; });
   req.on('end', async () => {
     try {
-      console.log('[sip-webhook] 📞 RAW REQUEST DEBUG:');
-      console.log('  Method:', req.method);
-      console.log('  URL:', req.url);
-      console.log('  Headers:', JSON.stringify(req.headers, null, 2));
-      console.log('  Body length:', body.length);
-      console.log('  Body content:', body);
-      console.log('  Body JSON:', body ? 'parsing...' : 'EMPTY!');
+      console.log('[sip-webhook] 📞 Incoming webhook request');
       
       const event = JSON.parse(body);
       const callId = event?.data?.call_id;
@@ -466,7 +464,7 @@ const server = http.createServer(async (req, res) => {
         }
       };
 
-      console.log('[sip-webhook] 🔄 Accepting call with payload:', JSON.stringify(acceptPayload, null, 2));
+      console.log('[sip-webhook] 🔄 Accepting call:', callId);
 
       const resAccept = await fetch(acceptUrl, {
         method: 'POST',
@@ -478,31 +476,11 @@ const server = http.createServer(async (req, res) => {
         body: JSON.stringify(acceptPayload)
       });
 
-      // Preberi odgovor kot text - KLJUČNO ZA DEBUGGING
-      try {
-        const responseText = await resAccept.text();
-        console.log('[sip-webhook] 📄 Accept response text:', responseText);
-        
-        // Poskusi parsirati JSON
-        let acceptResponse = null;
-        try {
-          acceptResponse = JSON.parse(responseText);
-          console.log('[sip-webhook] 📄 Accept response parsed:', JSON.stringify(acceptResponse, null, 2));
-        } catch (parseError) {
-          console.log('[sip-webhook] ⚠️ Could not parse accept response JSON:', parseError.message);
-        }
-
       if (!resAccept.ok) {
-          console.error('[sip-webhook] ❌ Accept failed:', resAccept.status, resAccept.statusText);
-          console.error('[sip-webhook] ❌ Accept response:', responseText);
-          res.writeHead(500);
-          res.end(JSON.stringify({ error: 'Accept failed' }));
-          return;
-        }
-      } catch (error) {
-        console.error('[sip-webhook] ❌ Accept response error:', error);
+        const responseText = await resAccept.text();
+        console.error('[sip-webhook] ❌ Accept failed:', resAccept.status, resAccept.statusText);
         res.writeHead(500);
-        res.end(JSON.stringify({ error: 'Accept response error' }));
+        res.end(JSON.stringify({ error: 'Accept failed' }));
         return;
       }
 
@@ -548,7 +526,6 @@ async function processCall(callId, event, callerFrom, callerPhone) {
     };
     
     if (OPENAI_PROJECT_ID) headers['OpenAI-Project'] = OPENAI_PROJECT_ID;
-    console.log('[sip-webhook] 🔗 WebSocket headers:', JSON.stringify(headers, null, 2));
     
     const ws = new WebSocket(wsUrl, { headers });
     
@@ -643,26 +620,19 @@ async function processCall(callId, event, callerFrom, callerPhone) {
       ws.on('message', (data) => {
         try {
           const message = JSON.parse(data);
-          console.log('[sip-webhook] 📨 Message:', message.type);
           
-          // Debug response events
-          if (message.type && message.type.startsWith('response.')) {
-            console.log('[sip-webhook] 🎭 Response event:', message.type, JSON.stringify(message, null, 2));
-          }
+          // Only log important message types to reduce verbosity
+          const importantTypes = [
+            'conversation.item.input_audio_transcription.completed',
+            'response.output_audio_transcript.done',
+            'response.function_call_arguments.done',
+            'conversation.item.created',
+            'error',
+            'session.updated'
+          ];
           
-          // Debug user message detection
-          if (message.type === 'conversation.item.created' && message.item?.type === 'message' && message.item?.role === 'user') {
-            console.log('[sip-webhook] 🐛 User message item:', JSON.stringify(message.item, null, 2));
-          }
-          
-          // Catch any user-related events for debugging
-          if (message.type && message.type.includes('conversation.item') && message.item?.role === 'user') {
-            console.log('[sip-webhook] 👤 User event:', message.type, JSON.stringify(message.item, null, 2));
-          }
-          
-          // Debug transcription events
-          if (message.type === 'conversation.item.input_audio_transcription.completed') {
-            console.log('[sip-webhook] 🐛 Audio transcription completed:', JSON.stringify(message, null, 2));
+          if (importantTypes.includes(message.type)) {
+            console.log('[sip-webhook] 📨', message.type);
           }
 
           // Log transcript events - Enhanced logging
@@ -683,16 +653,13 @@ async function processCall(callId, event, callerFrom, callerPhone) {
             });
             
           } else if (message.type === 'conversation.item.created' && message.item?.type === 'message' && message.item?.role === 'user') {
-            // Skip logging here - we'll log only when transcription is completed
-            console.log('[sip-webhook] 🎤 User audio received, waiting for transcription...');
+            // Skip detailed logging - just note audio received
+            console.log('[sip-webhook] 🎤 User audio received');
           } else if (message.type === 'conversation.item.added' && message.item?.type === 'message' && message.item?.role === 'user') {
-            // Check if user message has transcript
-            console.log('[sip-webhook] 🔍 User item added:', JSON.stringify(message.item, null, 2));
-            
             // Extract transcript from user message content if available
             const userContent = message.item?.content?.[0];
             if (userContent?.type === 'input_audio' && userContent.transcript) {
-              console.log('[sip-webhook] 🔄 User transcript from item:', userContent.transcript);
+              console.log('[sip-webhook] 🔄 User transcript (added):', userContent.transcript);
               
               logTranscriptEvent(callId, {
                 type: 'message',
@@ -707,13 +674,10 @@ async function processCall(callId, event, callerFrom, callerPhone) {
               });
             }
           } else if (message.type === 'conversation.item.done' && message.item?.type === 'message' && message.item?.role === 'user') {
-            // Check conversation.item.done for user transcripts (alternative for SIP)
-            console.log('[sip-webhook] 🔍 User item done:', JSON.stringify(message.item, null, 2));
-            
             // Extract transcript from user message content if available
             const userContent = message.item?.content?.[0];
             if (userContent?.type === 'input_audio' && userContent.transcript) {
-              console.log('[sip-webhook] 🔄 User transcript from done:', userContent.transcript);
+              console.log('[sip-webhook] 🔄 User transcript (done):', userContent.transcript);
               
               logTranscriptEvent(callId, {
                 type: 'message',
@@ -753,54 +717,43 @@ async function processCall(callId, event, callerFrom, callerPhone) {
               pendingToolResults.set(callId, new Set());
             }
             pendingToolResults.get(callId).add(message.call_id);
-            console.log(`[sip-webhook] 🔧 Tool call ${message.call_id} started, tracking as pending`);
+            console.log(`[sip-webhook] 🔧 Tool call: ${message.name}`);
             
             logTranscriptEvent(callId, {
               type: 'tool_call',
               tool_name: message.name,
-              arguments: parsedArgs,  // ← ACTUAL VALUES, not JSON string
+              arguments: parsedArgs,
               call_id: message.call_id,
               timestamp: new Date().toISOString(),
               metadata: {
                 toolName: message.name,
                 callId: message.call_id,
-                argumentCount: Object.keys(parsedArgs).length,
-                argumentKeys: Object.keys(parsedArgs),
-                fullArguments: parsedArgs  // ← FULL DATA for debugging
+                argumentCount: Object.keys(parsedArgs).length
               }
             });
           } else if (message.type === 'conversation.item.created' && message.item?.type === 'function_call_output') {
             // Tool call result
             const output = message.item.output || {};
-            // No need to parse - output is already an object now
             const parsedOutput = typeof output === 'string' ? JSON.parse(output) : output;
             
             logTranscriptEvent(callId, {
               type: 'tool_result',
               tool_call_id: message.item.call_id,
-              result: parsedOutput,  // ← ACTUAL RESULT OBJECT, not JSON string
+              result: parsedOutput,
               timestamp: new Date().toISOString(),
               metadata: {
                 callId: message.item.call_id,
                 status: parsedOutput.success ? 'success' : 'error',
-                resultType: typeof parsedOutput,
-                hasData: !!(parsedOutput.data || parsedOutput.content),
-                fullResult: parsedOutput,  // ← FULL RESULT for debugging
                 mode: parsedOutput.mode || 'mcp',
                 mcpSuccess: parsedOutput.success === true
               }
             });
             
-            // Tool result is already sent by handleToolCall function
-            // No need to send it again here to avoid conflicts
-            
             // Mark this tool call as completed
             if (pendingToolResults.has(callId)) {
               pendingToolResults.get(callId).delete(message.item.call_id);
-              console.log(`[sip-webhook] ✅ Tool call ${message.item.call_id} completed, ${pendingToolResults.get(callId).size} remaining`);
+              console.log(`[sip-webhook] ✅ Tool completed: ${message.item.call_id}`);
             }
-            
-            console.log(`[sip-webhook] 🔧 Tool result sent back to OpenAI for call ${message.item.call_id}`);
           } else if (message.type === 'error') {
             // Errors - include full error details and send urgent emails
             const errorDetails = message.error || message;
@@ -936,39 +889,85 @@ async function processCall(callId, event, callerFrom, callerPhone) {
 // Tool call handler
 async function handleToolCall(ws, message, callerPhone, callId) {
   try {
-    console.log('[sip-webhook] 🔧 Tool call:', message.name, message.arguments);
+    console.log('[sip-webhook] 🔧 Tool call:', message.name);
     
     // Execute tool call directly without processing message
 
     let result;
     if (message.name === 's6792596_fancita_rezervation_supabase' || message.name === 's6798488_fancita_order_supabase') {
-      // Call MCP endpoint
-      const mcpUrl = process.env.MCP_SERVER_URL;
-      if (!mcpUrl) {
-        throw new Error('MCP_SERVER_URL not configured in environment');
-      }
+      // Try Next.js MCP API first (proper MCP protocol), then fallback to direct Make.com
+      const nextjsApiUrl = process.env.NEXTJS_API_URL || 'http://localhost:3000';
+      const mcpApiUrl = `${nextjsApiUrl}/api/mcp`;
       
-      const response = await fetch(mcpUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: message.name,
-          data: JSON.parse(message.arguments)
-        })
-      });
+      console.log(`[sip-webhook] 🔍 Trying Next.js MCP API: ${mcpApiUrl}`);
+      
+      try {
+        const response = await fetch(mcpApiUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: message.name,
+            data: JSON.parse(message.arguments)
+          })
+        });
 
-      if (response.ok) {
-        const mcpResponse = await response.json();
-        console.log('[sip-webhook] ✅ MCP call successful:', mcpResponse);
-        
-        // Extract the actual result from MCP API wrapper
-        if (mcpResponse.success && mcpResponse.data) {
-          result = mcpResponse.data; // Use the actual MCP result
+        if (response.ok) {
+          const mcpResponse = await response.json();
+          console.log('[sip-webhook] ✅ Next.js MCP API call successful');
+          
+          if (mcpResponse.success && mcpResponse.data) {
+            result = mcpResponse.data;
+          } else {
+            result = mcpResponse;
+          }
         } else {
-          result = mcpResponse; // Fallback to full response
+          console.log(`[sip-webhook] ⚠️ Next.js MCP API failed: ${response.status}, trying direct Make.com`);
+          throw new Error(`Next.js API failed: ${response.status}`);
         }
-      } else {
-        result = { success: false, error: 'MCP call failed' };
+      } catch (nextjsError) {
+        console.log(`[sip-webhook] 🔄 Fallback to direct Make.com URL`);
+        
+        // Fallback to direct Make.com call (original approach)
+        const mcpUrl = process.env.MCP_SERVER_URL;
+        console.log(`[sip-webhook] 🔍 DEBUG: Using direct MCP URL: ${mcpUrl}`);
+        if (!mcpUrl) {
+          throw new Error('Neither Next.js API nor MCP_SERVER_URL available');
+        }
+        
+        const response = await fetch(mcpUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: message.name,
+            data: JSON.parse(message.arguments)
+          })
+        });
+
+        if (response.ok) {
+          const mcpResponse = await response.json();
+          console.log('[sip-webhook] ✅ Direct MCP call successful');
+          
+          if (mcpResponse.success && mcpResponse.data) {
+            result = mcpResponse.data;
+          } else {
+            result = mcpResponse;
+          }
+        } else {
+          console.log(`[sip-webhook] ❌ Direct MCP call failed: ${response.status} ${response.statusText}`);
+          
+          let errorText = 'Unknown error';
+          try {
+            errorText = await response.text();
+          } catch (e) {
+            // Silent fail for response text
+          }
+          
+          result = { 
+            success: false, 
+            error: `Both Next.js API and direct MCP failed. Direct: ${response.status} ${response.statusText}`,
+            details: errorText
+          };
+        }
       }
     } else if (message.name === 'transfer_to_staff') {
       // Simulate staff handoff
@@ -1053,9 +1052,7 @@ async function handleToolCall(ws, message, callerPhone, callId) {
     // Trigger response so Maja can react to the tool result
     ws.send(JSON.stringify({ type: 'response.create' }));
     
-    console.log(`[sip-webhook] 🔧 Tool result sent for call ${message.call_id}:`, result);
-    console.log(`[sip-webhook] 🔧 Tool result type:`, typeof result, 'Success:', result?.success);
-    console.log(`[sip-webhook] 🔧 Input audio transcription re-enabled for call ${callId}`);
+    console.log(`[sip-webhook] 🔧 Tool result sent: ${message.call_id} (${result?.success ? 'success' : 'failed'})`);
 
   } catch (error) {
     console.error('[sip-webhook] ❌ Tool call error:', error);
