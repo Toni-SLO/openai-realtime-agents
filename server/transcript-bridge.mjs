@@ -75,7 +75,27 @@ wss.on('connection', (ws, req) => {
         
         console.log(`[transcript-bridge] Transcript event for session ${sessionId}:`, event.type);
         
-        // Store/update transcript
+        // CRITICAL: Also write to file for SIP Transcripts UI
+        try {
+          const fs = require('fs');
+          const path = require('path');
+          
+          const transcriptsDir = path.join(process.cwd(), 'server', 'logs', 'transcripts');
+          if (!fs.existsSync(transcriptsDir)) {
+            fs.mkdirSync(transcriptsDir, { recursive: true });
+          }
+          
+          const logFile = path.join(transcriptsDir, `${sessionId}.log`);
+          const timestamp = new Date().toISOString();
+          const logEntry = `[${timestamp}] ${JSON.stringify(event)}\n`;
+          
+          fs.appendFileSync(logFile, logEntry);
+          console.log(`[transcript-bridge] 📝 Logged ${event.type} to file for ${sessionId}`);
+        } catch (error) {
+          console.warn('[transcript-bridge] ❌ Failed to log to file:', error.message);
+        }
+        
+        // Store/update transcript in memory
         if (!activeSessions.has(sessionId)) {
           activeSessions.set(sessionId, {
             sessionId,

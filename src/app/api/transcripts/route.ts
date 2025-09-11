@@ -70,3 +70,60 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
+
+export async function DELETE(request: NextRequest) {
+  try {
+    const { searchParams } = new URL(request.url);
+    const sessionId = searchParams.get('sessionId');
+    const deleteAll = searchParams.get('deleteAll') === 'true';
+    
+    const transcriptsDir = path.join(process.cwd(), 'server', 'logs', 'transcripts');
+    
+    if (!fs.existsSync(transcriptsDir)) {
+      return NextResponse.json({ error: 'Transcripts directory not found' }, { status: 404 });
+    }
+    
+    if (deleteAll) {
+      // Delete all transcript files
+      const files = fs.readdirSync(transcriptsDir).filter(file => file.endsWith('.log'));
+      let deletedCount = 0;
+      
+      for (const file of files) {
+        try {
+          fs.unlinkSync(path.join(transcriptsDir, file));
+          deletedCount++;
+        } catch (error) {
+          console.warn(`Failed to delete ${file}:`, error);
+        }
+      }
+      
+      return NextResponse.json({ 
+        success: true, 
+        message: `Deleted ${deletedCount} transcript files`,
+        deletedCount 
+      });
+    }
+    
+    if (sessionId) {
+      // Delete specific transcript
+      const logFile = path.join(transcriptsDir, `${sessionId}.log`);
+      
+      if (!fs.existsSync(logFile)) {
+        return NextResponse.json({ error: 'Transcript not found' }, { status: 404 });
+      }
+      
+      fs.unlinkSync(logFile);
+      
+      return NextResponse.json({ 
+        success: true, 
+        message: `Transcript ${sessionId} deleted successfully` 
+      });
+    }
+    
+    return NextResponse.json({ error: 'No sessionId or deleteAll parameter provided' }, { status: 400 });
+    
+  } catch (error: any) {
+    console.error('Delete transcripts API error:', error);
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+}

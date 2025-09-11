@@ -30,9 +30,68 @@ export function TranscriptViewer() {
   const [loading, setLoading] = useState(false);
   const [transcriptMetadata, setTranscriptMetadata] = useState<{[key: string]: any}>({});
   const [isVisible, setIsVisible] = useState(false);
-  const [liveTranscripts, setLiveTranscripts] = useState<{[sessionId: string]: TranscriptEvent[]}>({});
   const [autoScroll, setAutoScroll] = useState(true);
+  const [deleteConfirm, setDeleteConfirm] = useState<string>('');
   const transcriptEndRef = useRef<HTMLDivElement>(null);
+
+  // Helper function to extract phone number from caller info
+  const extractPhoneNumber = (callerPhone: string): string => {
+    if (!callerPhone) return 'Unknown';
+    
+    // Extract just the phone number from complex string like:
+    // "38641734134" <sip:+38641734134@pstn.twilio.com>;tag=...
+    const phoneMatch = callerPhone.match(/["\']?(\+?[0-9]{8,15})["\']?/);
+    return phoneMatch ? phoneMatch[1] : callerPhone.slice(0, 15) + '...';
+  };
+
+  // Helper function to get language name
+  const getLanguageName = (langCode: string): string => {
+    const languages: {[key: string]: string} = {
+      'hr': 'HR',
+      'sl': 'SL', 
+      'en': 'EN',
+      'de': 'DE',
+      'it': 'IT',
+      'nl': 'NL'
+    };
+    return languages[langCode] || langCode?.toUpperCase() || 'HR';
+  };
+
+  const deleteTranscript = async (sessionId: string) => {
+    try {
+      const response = await fetch(`/api/transcripts?sessionId=${sessionId}`, {
+        method: 'DELETE'
+      });
+      
+      if (response.ok) {
+        await loadTranscripts(); // Reload list
+        if (selectedSessionId === sessionId) {
+          setSelectedTranscript(null);
+          setSelectedSessionId('');
+        }
+        setDeleteConfirm('');
+      }
+    } catch (error) {
+      console.error('Failed to delete transcript:', error);
+    }
+  };
+
+  const deleteAllTranscripts = async () => {
+    try {
+      const response = await fetch('/api/transcripts?deleteAll=true', {
+        method: 'DELETE'
+      });
+      
+      if (response.ok) {
+        await loadTranscripts(); // Reload list
+        setSelectedTranscript(null);
+        setSelectedSessionId('');
+        setDeleteConfirm('');
+      }
+    } catch (error) {
+      console.error('Failed to delete all transcripts:', error);
+    }
+  };
 
   const loadTranscripts = async () => {
     try {
@@ -49,13 +108,56 @@ export function TranscriptViewer() {
             const transcriptResponse = await fetch(`/api/transcripts?sessionId=${transcript.sessionId}`);
             if (transcriptResponse.ok) {
               const transcriptData = await transcriptResponse.json();
-              const events = transcriptData.content || [];
+              const events = transcriptData.events || [];
               
               // Find session_start event for metadata
               const sessionStart = events.find((event: TranscriptEvent) => event.type === 'session_start');
+              
+              // Find the actual language used (look for switch_language tool calls)
+              const languageSwitch = events.find((event: TranscriptEvent) => 
+                event.type === 'tool_call' && event.tool_name === 'switch_language'
+              );
+              
+              // Find guest name from MCP tool calls (reservations or orders)
+              const mcpToolCall = events.find((event: TranscriptEvent) => 
+                event.type === 'tool_call' && 
+                (event.tool_name === 's6792596_fancita_rezervation_supabase' || 
+                 event.tool_name === 's6798488_fancita_order_supabase')
+              );
+              
+              let guestName = '';
+              if (mcpToolCall && mcpToolCall.arguments) {
+                try {
+                  const args = typeof mcpToolCall.arguments === 'string' 
+                    ? JSON.parse(mcpToolCall.arguments) 
+                    : mcpToolCall.arguments;
+                  guestName = args.name || '';
+                } catch (e) {
+                  console.warn('Failed to parse MCP tool arguments:', e);
+                }
+              }
+              
               if (sessionStart && sessionStart.metadata) {
+                const rawPhone = sessionStart.metadata.callerPhone || 'Unknown';
+                
+                // Use switched language if available, otherwise initial language
+                let finalLanguage = sessionStart.metadata.initialLanguage || 'hr';
+                if (languageSwitch && languageSwitch.arguments) {
+                  try {
+                    const switchArgs = typeof languageSwitch.arguments === 'string' 
+                      ? JSON.parse(languageSwitch.arguments) 
+                      : languageSwitch.arguments;
+                    finalLanguage = switchArgs.language_code || finalLanguage;
+                  } catch (e) {
+                    console.warn('Failed to parse switch_language arguments:', e);
+                  }
+                }
+                
                 metadata[transcript.sessionId] = {
-                  callerPhone: sessionStart.metadata.callerPhone || 'Unknown',
+                  callerPhone: rawPhone,
+                  phoneNumber: extractPhoneNumber(rawPhone),
+                  guestName: guestName,
+                  language: getLanguageName(finalLanguage),
                   startTime: sessionStart.metadata.startTimeFormatted || sessionStart.metadata.startTime || transcript.created,
                   duration: calculateDuration(events)
                 };
@@ -120,50 +222,30 @@ export function TranscriptViewer() {
         if (data.type === 'transcript_update' || data.type === 'transcript_event') {
           const { sessionId, event: transcriptEvent } = data;
           
-          setLiveTranscripts(prev => ({
-            ...prev,
-            [sessionId]: [...(prev[sessionId] || []), transcriptEvent]
-          }));
+          // CRITICAL: Transcript events are received via WebSocket but need to be saved to files
+          // The transcript-bridge receives events and stores them in memory, but we also need
+          // them saved to logs/transcripts/ files for the SIP Transcripts UI
           
-          // Auto-select new live sessions
-          if (!selectedSessionId || selectedSessionId === sessionId) {
-            setSelectedTranscript(prev => prev ? [...prev, transcriptEvent] : [transcriptEvent]);
-            setSelectedSessionId(sessionId);
-            
-            // Auto-scroll to bottom for live sessions
-            if (autoScroll && liveTranscripts[sessionId]) {
-              setTimeout(() => {
-                transcriptEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-              }, 100);
-            }
-          }
+          console.log('[TranscriptViewer] Transcript event received:', sessionId, transcriptEvent.type);
           
-          // Refresh transcript list to show new sessions
+          // Refresh transcript list to show new sessions (files are written by transcript-bridge)
           if (isVisible) {
-            loadTranscripts();
+            // Debounce refresh to avoid too many calls
+            setTimeout(() => {
+              loadTranscripts();
+            }, 1000);
           }
         } else if (data.type === 'new_sip_session') {
           const { sessionId } = data;
           console.log('[TranscriptViewer] New SIP session started:', sessionId);
           
-          // Initialize empty transcript for new session
-          setLiveTranscripts(prev => ({
-            ...prev,
-            [sessionId]: []
-          }));
+          // LIVE functionality disabled
         } else if (data.type === 'session_ended') {
           const { sessionId } = data;
           console.log('[TranscriptViewer] SIP session ended:', sessionId);
           
-          // Move from live to completed after a delay
+          // Refresh transcript list after session ends
           setTimeout(() => {
-            setLiveTranscripts(prev => {
-              const newLive = { ...prev };
-              delete newLive[sessionId];
-              return newLive;
-            });
-            
-            // Refresh to show in completed list
             if (isVisible) {
               loadTranscripts();
             }
@@ -242,36 +324,37 @@ export function TranscriptViewer() {
           {/* Left panel - Transcript list */}
           <div className="w-1/3 border-r bg-gray-50 overflow-y-auto">
             <div className="p-4">
-              {/* Live calls section */}
-              {Object.keys(liveTranscripts).length > 0 && (
-                <div className="mb-6">
-                  <h3 className="font-semibold text-green-600 mb-3">🔴 LIVE Pozivi</h3>
-                  <div className="space-y-2">
-                    {Object.entries(liveTranscripts).map(([sessionId, events]) => (
-                      <div
-                        key={sessionId}
-                        onClick={() => {
-                          setSelectedTranscript(events);
-                          setSelectedSessionId(sessionId);
-                        }}
-                        className={`p-3 rounded cursor-pointer border border-green-200 bg-green-50 hover:bg-green-100 ${
-                          selectedSessionId === sessionId ? 'ring-2 ring-green-400' : ''
-                        }`}
-                      >
-                        <div className="flex items-center text-sm font-semibold text-green-700 mb-1">
-                          🔴 LIVE - {sessionId.slice(-8)}
-                        </div>
-                        <div className="text-xs text-green-600">
-                          {events.length} događaja
-                        </div>
-                        <div className="text-xs text-green-500">
-                          Poslednji: {events.length > 0 ? formatTimestamp(events[events.length - 1].timestamp) : 'N/A'}
-                        </div>
+              {/* Delete buttons section */}
+              <div className="mb-6">
+                <h3 className="font-semibold text-red-600 mb-3">🗑️ Upravljanje</h3>
+                <div className="space-y-2">
+                  <button
+                    onClick={() => setDeleteConfirm('all')}
+                    className="w-full px-2 py-1 bg-red-500 text-white rounded hover:bg-red-600 text-xs"
+                  >
+                    🗑️ Izbriši vse
+                  </button>
+                  {deleteConfirm === 'all' && (
+                    <div className="p-3 bg-red-50 border border-red-200 rounded">
+                      <p className="text-sm text-red-700 mb-2">Ali ste prepričani?</p>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={deleteAllTranscripts}
+                          className="px-2 py-0.5 bg-red-600 text-white rounded text-xs hover:bg-red-700"
+                        >
+                          DA, izbriši vse
+                        </button>
+                        <button
+                          onClick={() => setDeleteConfirm('')}
+                          className="px-2 py-0.5 bg-gray-300 text-gray-700 rounded text-xs hover:bg-gray-400"
+                        >
+                          Prekliči
+                        </button>
                       </div>
-                    ))}
-                  </div>
+                    </div>
+                  )}
                 </div>
-              )}
+              </div>
               
               <div className="flex items-center justify-between mb-4">
                 <h3 className="font-semibold">Recent Calls</h3>
@@ -293,16 +376,64 @@ export function TranscriptViewer() {
                       <div
                         key={transcript.sessionId}
                         onClick={() => loadTranscript(transcript.sessionId)}
-                        className={`p-3 rounded cursor-pointer border ${
+                        className={`p-3 rounded border cursor-pointer ${
                           selectedSessionId === transcript.sessionId
                             ? 'bg-blue-100 border-blue-300'
                             : 'bg-white border-gray-200 hover:bg-gray-50'
                         }`}
                       >
-                        {/* Phone number */}
-                        <div className="flex items-center text-sm font-semibold text-blue-600 mb-1">
-                          📞 {metadata?.callerPhone || 'Unknown'}
+                        {/* Header with phone and delete button */}
+                        <div className="flex items-center justify-between mb-1">
+                          <div className="flex items-center text-sm font-semibold text-blue-600 flex-1">
+                            📞 {metadata?.phoneNumber || 'Unknown'}
+                            {metadata?.guestName && (
+                              <span className="ml-2 text-green-700 font-medium">
+                                {metadata.guestName}
+                              </span>
+                            )}
+                            {metadata?.language && (
+                              <span className="ml-2 px-1 py-0.5 bg-blue-100 text-blue-700 rounded text-xs">
+                                {metadata.language}
+                              </span>
+                            )}
+                          </div>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setDeleteConfirm(transcript.sessionId);
+                            }}
+                            className="ml-2 px-1 py-0.5 bg-red-500 text-white rounded text-xs hover:bg-red-600"
+                          >
+                            🗑️
+                          </button>
                         </div>
+                        
+                        {/* Delete confirmation for this transcript */}
+                        {deleteConfirm === transcript.sessionId && (
+                          <div className="mb-2 p-2 bg-red-50 border border-red-200 rounded">
+                            <p className="text-xs text-red-700 mb-1">Izbriši transcript?</p>
+                            <div className="flex gap-1">
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  deleteTranscript(transcript.sessionId);
+                                }}
+                                className="px-1 py-0.5 bg-red-600 text-white rounded text-xs hover:bg-red-700"
+                              >
+                                DA
+                              </button>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setDeleteConfirm('');
+                                }}
+                                className="px-1 py-0.5 bg-gray-300 text-gray-700 rounded text-xs hover:bg-gray-400"
+                              >
+                                NE
+                              </button>
+                            </div>
+                          </div>
+                        )}
                         
                         {/* Date and time */}
                         <div className="text-sm text-gray-800 mb-1">
@@ -342,33 +473,23 @@ export function TranscriptViewer() {
                 <div className="mb-4">
                   <div className="flex items-center gap-2">
                     <h3 className="font-semibold">
-                      {liveTranscripts[selectedSessionId] ? '🔴 LIVE' : '📋'} Call: {selectedSessionId.slice(-8)}
+                      📋 Call: {selectedSessionId.slice(-8)}
                     </h3>
-                    {liveTranscripts[selectedSessionId] && (
-                      <span className="bg-red-100 text-red-700 text-xs px-2 py-1 rounded-full animate-pulse">
-                        UŽIVO
-                      </span>
-                    )}
                   </div>
                   <div className="flex items-center justify-between">
                     <div className="text-sm text-gray-600">
                       {selectedTranscript.length} događaja
-                      {liveTranscripts[selectedSessionId] && (
-                        <span className="ml-2 text-green-600">• Poziv u toku</span>
-                      )}
                     </div>
-                    {liveTranscripts[selectedSessionId] && (
-                      <button
-                        onClick={() => setAutoScroll(!autoScroll)}
-                        className={`text-xs px-2 py-1 rounded ${
-                          autoScroll 
-                            ? 'bg-green-100 text-green-700' 
-                            : 'bg-gray-100 text-gray-600'
-                        }`}
-                      >
-                        {autoScroll ? '📍 Auto-scroll' : '📍 Manual'}
-                      </button>
-                    )}
+                    <button
+                      onClick={() => setAutoScroll(!autoScroll)}
+                      className={`text-xs px-2 py-1 rounded ${
+                        autoScroll 
+                          ? 'bg-green-100 text-green-700' 
+                          : 'bg-gray-100 text-gray-600'
+                      }`}
+                    >
+                      {autoScroll ? '📍 Auto-scroll' : '📍 Manual'}
+                    </button>
                   </div>
                 </div>
                 

@@ -1463,6 +1463,8 @@ async function processCall(callId, event, callerFrom, callerPhone) {
             const audioData = message.delta;
             if (audioData) {
               console.log('[sip-webhook] 🔊 Audio delta received, length:', audioData.length);
+              console.log('[sip-webhook] 🔊 WebSocket state:', ws ? ws.readyState : 'null');
+              console.log('[sip-webhook] 🔊 CallId (streamSid):', callId);
               
               // Forward audio to Twilio via WebSocket
               if (ws && ws.readyState === WebSocket.OPEN) {
@@ -1481,13 +1483,17 @@ async function processCall(callId, event, callerFrom, callerPhone) {
                     }));
                   }
                   
-                  console.log('[sip-webhook] 🔊 Audio forwarded to Twilio, frames:', Math.ceil(buf.length / frameSize));
+                  console.log('[sip-webhook] ✅ Audio forwarded to Twilio, frames:', Math.ceil(buf.length / frameSize));
                 } catch (error) {
                   console.error('[sip-webhook] ❌ Audio forwarding error:', error);
                 }
               } else {
                 console.warn('[sip-webhook] ⚠️ WebSocket not available for audio forwarding');
+                console.warn('[sip-webhook] ⚠️ WS state:', ws ? ws.readyState : 'null');
+                console.warn('[sip-webhook] ⚠️ WS exists:', !!ws);
               }
+            } else {
+              console.warn('[sip-webhook] ⚠️ No audio data in delta event');
             }
             
           } else if (message.type === 'response.output_audio_transcript.done') {
