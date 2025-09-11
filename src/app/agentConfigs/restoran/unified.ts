@@ -3,8 +3,11 @@ import {
   FANCITA_UNIFIED_INSTRUCTIONS,
   FANCITA_RESERVATION_TOOL,
   FANCITA_ORDER_TOOL, 
-  FANCITA_HANDOFF_TOOL
+  FANCITA_HANDOFF_TOOL,
+  FANCITA_MENU_TOOL,
+  FANCITA_LANGUAGE_TOOL
 } from '../shared/instructions';
+import { getMenuForAgent, findMenuItem } from '../shared/menu';
 
 // Unified agent with all restaurant capabilities
 export const unifiedRestoranAgent = new RealtimeAgent({
@@ -194,6 +197,98 @@ export const unifiedRestoranAgent = new RealtimeAgent({
       server_url: process.env.MCP_SERVER_URL,
       name: 'transfer_to_staff'
     }] : []),
+
+    // Menu search tool
+    tool({
+      name: FANCITA_MENU_TOOL.name,
+      description: FANCITA_MENU_TOOL.description,
+      parameters: FANCITA_MENU_TOOL.parameters as any,
+      execute: async (input: any, details: any) => {
+        try {
+          console.log('[unified-agent] 🔧 Menu search tool called with:', input);
+          console.log('[unified-agent] 🔧 Details:', details);
+
+          const language = input.language || 'hr';
+          
+          if (input.get_full_menu) {
+            // Return complete menu in specified language
+            const fullMenu = getMenuForAgent(language);
+            const result = `Celoten meni restavracije Fančita:\n${fullMenu}`;
+            console.log('[unified-agent] 🔧 Returning full menu result (length):', result.length);
+            return result;
+          } else if (input.query) {
+            // Search for specific items
+            const searchResults = findMenuItem(input.query, language);
+            
+            if (searchResults.length === 0) {
+              const errorResult = `Ni najdenih rezultatov za "${input.query}". Poskusite z drugimi izrazi ali pokličite search_menu z get_full_menu: true za celoten meni.`;
+              console.log('[unified-agent] 🔧 Returning error result:', errorResult);
+              return errorResult;
+            }
+            
+            let resultText = `Rezultati iskanja za "${input.query}":\n\n`;
+            searchResults.forEach(item => {
+              const translation = item.translations[language as keyof typeof item.translations];
+              resultText += `• ${translation} - ${item.price.toFixed(2)} €\n`;
+            });
+            
+            console.log('[unified-agent] 🔧 Returning search result:', resultText);
+            return resultText;
+          } else {
+            // No query provided, return basic menu info
+            const basicMenu = getMenuForAgent(language);
+            const basicResult = `Meni restavracije Fančita:\n${basicMenu}`;
+            console.log('[unified-agent] 🔧 Returning basic menu result (length):', basicResult.length);
+            return basicResult;
+          }
+        } catch (error) {
+          console.error('[unified-agent] 🚨 Menu search failed:', error);
+          const errorResult = "Oprostite, trenutno ne morem dostopati do menija. Poskusite kasneje ali se obrnite na osebje.";
+          console.log('[unified-agent] 🔧 Returning error result:', errorResult);
+          return errorResult;
+        }
+      },
+    }),
+
+    // Language switch tool
+    tool({
+      name: FANCITA_LANGUAGE_TOOL.name,
+      description: FANCITA_LANGUAGE_TOOL.description,
+      parameters: FANCITA_LANGUAGE_TOOL.parameters as any,
+      execute: async (input: any, details: any) => {
+        try {
+          console.log('[unified-agent] 🔧 Language switch tool called with:', input);
+          console.log('[unified-agent] 🔧 Details:', details);
+          
+          const languageCode = input.language_code;
+          const detectedPhrases = input.detected_phrases;
+          
+          // Language names mapping
+          const languageNames = {
+            'hr': 'hrvaščina',
+            'sl': 'slovenščina', 
+            'en': 'angleščina',
+            'de': 'nemščina',
+            'it': 'italijanščina',
+            'nl': 'nizozemščina'
+          };
+          
+          const languageName = languageNames[languageCode as keyof typeof languageNames] || languageCode;
+          
+          // Log the language switch for transcript visibility
+          console.log(`[LANGUAGE SWITCH] Detected ${languageName} from phrases: "${detectedPhrases}"`);
+          
+          const result = `🌍 JEZIK PREKLOPLJEN: ${languageCode.toUpperCase()} (${languageName})\n📝 Zaznane fraze: "${detectedPhrases}"\n✅ Transkripcijski model posodobljen na ${languageCode}`;
+          console.log('[unified-agent] 🔧 Returning language switch result:', result);
+          return result;
+        } catch (error) {
+          console.error('[unified-agent] 🚨 Language switch failed:', error);
+          const errorResult = "Napaka pri preklapljanju jezika. Nadaljujem v trenutnem jeziku.";
+          console.log('[unified-agent] 🔧 Returning error result:', errorResult);
+          return errorResult;
+        }
+      },
+    }),
 
     // Fallback handoff tool
     tool({

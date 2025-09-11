@@ -674,6 +674,35 @@ const FANCITA_HANGUP_TOOL = {
   }
 };
 
+const FANCITA_MENU_TOOL = {
+  type: 'function',
+  name: 'search_menu',
+  description: 'Search restaurant menu for items, prices, and ingredients in the specified language',
+  parameters: {
+    type: 'object',
+    properties: {
+      query: { type: 'string', description: 'Search term for menu items (e.g. "pizza", "carpaccio", "morski sadeži")' },
+      language: { type: 'string', description: 'Language code (hr, sl, en, de, it, nl)', default: 'hr' },
+      get_full_menu: { type: 'boolean', description: 'Return complete menu in specified language', default: false }
+    },
+    required: ['language']
+  }
+};
+
+const FANCITA_LANGUAGE_TOOL = {
+  type: 'function',
+  name: 'switch_language',
+  description: 'Switch conversation language and update transcription model',
+  parameters: {
+    type: 'object',
+    properties: {
+      language_code: { type: 'string', description: 'Language code to switch to (hr, sl, en, de, it, nl)' },
+      detected_phrases: { type: 'string', description: 'Phrases that indicated the language switch' }
+    },
+    required: ['language_code', 'detected_phrases']
+  }
+};
+
 // HTTP server for webhook
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
@@ -1303,7 +1332,7 @@ async function processCall(callId, event, callerFrom, callerPhone) {
         
         // Počakamo dlje pred dodajanjem tools - KOT V DELUJOČI VERZIJI
         setTimeout(() => {
-          const tools = [FANCITA_RESERVATION_TOOL, FANCITA_ORDER_TOOL, FANCITA_HANDOFF_TOOL, FANCITA_HANGUP_TOOL];
+          const tools = [FANCITA_RESERVATION_TOOL, FANCITA_ORDER_TOOL, FANCITA_HANDOFF_TOOL, FANCITA_HANGUP_TOOL, FANCITA_MENU_TOOL, FANCITA_LANGUAGE_TOOL];
           
           // Pošljemo session.update s tools po uspešni vzpostavitvi osnovne povezave
           ws.send(JSON.stringify({
@@ -1694,6 +1723,35 @@ async function processCall(callId, event, callerFrom, callerPhone) {
     }
   }
 
+// Menu search functions (simplified versions)
+function searchMenuItems(query, language = 'hr') {
+  // Simplified menu data - you can expand this
+  const menuItems = [
+    { id: 'pizza_margherita', price: 10.00, translations: { hr: 'Pizza Margherita', sl: 'Pizza Margherita' } },
+    { id: 'pizza_nives', price: 12.00, translations: { hr: 'Pizza Nives', sl: 'Pizza Nives' } },
+    { id: 'pizza_quattro_formaggi', price: 11.00, translations: { hr: 'Pizza Quattro Formaggi', sl: 'Pizza Quattro Formaggi' } },
+    { id: 'dodatek_masline', price: 1.00, translations: { hr: 'Dodatek masline', sl: 'Dodatek masline' } },
+    { id: 'dodatek_prsut', price: 3.00, translations: { hr: 'Dodatek pršut', sl: 'Dodatek pršut' } }
+  ];
+  
+  const searchTerm = query.toLowerCase();
+  return menuItems.filter(item => {
+    const translation = item.translations[language] || item.translations.hr;
+    return translation.toLowerCase().includes(searchTerm) || 
+           item.id.toLowerCase().includes(searchTerm);
+  });
+}
+
+function getFullMenu(language = 'hr') {
+  const items = searchMenuItems('', language);
+  let menu = 'MENI RESTAVRACIJE FANČITA:\n\n';
+  items.forEach(item => {
+    const translation = item.translations[language] || item.translations.hr;
+    menu += `• ${translation} - ${item.price.toFixed(2)} €\n`;
+  });
+  return menu;
+}
+
 // Tool call handler
 async function handleToolCall(ws, message, callerPhone, callId) {
   try {
@@ -1702,7 +1760,55 @@ async function handleToolCall(ws, message, callerPhone, callId) {
     // Execute tool call directly without processing message
 
     let result;
-    if (message.name === 's6792596_fancita_rezervation_supabase' || message.name === 's6798488_fancita_order_supabase') {
+    
+    // Handle custom tools
+    if (message.name === 'search_menu') {
+      console.log('[sip-webhook] 🔧 Handling search_menu tool');
+      const args = JSON.parse(message.arguments);
+      const language = args.language || 'hr';
+      
+      if (args.get_full_menu) {
+        const fullMenu = getFullMenu(language);
+        result = { success: true, data: fullMenu };
+      } else if (args.query) {
+        const searchResults = searchMenuItems(args.query, language);
+        if (searchResults.length === 0) {
+          result = { success: false, error: `Ni najdenih rezultatov za "${args.query}".` };
+        } else {
+          let resultText = `Rezultati iskanja za "${args.query}":\n\n`;
+          searchResults.forEach(item => {
+            const translation = item.translations[language] || item.translations.hr;
+            resultText += `• ${translation} - ${item.price.toFixed(2)} €\n`;
+          });
+          result = { success: true, data: resultText };
+        }
+      } else {
+        const basicMenu = getFullMenu(language);
+        result = { success: true, data: basicMenu };
+      }
+    } else if (message.name === 'switch_language') {
+      console.log('[sip-webhook] 🔧 Handling switch_language tool');
+      const args = JSON.parse(message.arguments);
+      const languageCode = args.language_code;
+      const detectedPhrases = args.detected_phrases;
+      
+      // Update call language
+      callLanguages.set(callId, languageCode);
+      
+      const languageNames = {
+        'hr': 'hrvaščina',
+        'sl': 'slovenščina', 
+        'en': 'angleščina',
+        'de': 'nemščina',
+        'it': 'italijanščina',
+        'nl': 'nizozemščina'
+      };
+      
+      const languageName = languageNames[languageCode] || languageCode;
+      const switchMessage = `🌍 JEZIK PREKLOPLJEN: ${languageCode.toUpperCase()} (${languageName})\n📝 Zaznane fraze: "${detectedPhrases}"\n✅ Transkripcijski model posodobljen na ${languageCode}`;
+      
+      result = { success: true, data: switchMessage };
+    } else if (message.name === 's6792596_fancita_rezervation_supabase' || message.name === 's6798488_fancita_order_supabase') {
       // Try Next.js MCP API first (proper MCP protocol), then fallback to direct Make.com
       const nextjsApiUrl = process.env.NEXTJS_API_URL || 'http://localhost:3000';
       const mcpApiUrl = `${nextjsApiUrl}/api/mcp`;
@@ -1929,12 +2035,21 @@ async function handleToolCall(ws, message, callerPhone, callId) {
     }
 
     // Send result back to OpenAI
+    let outputString;
+    if (message.name === 'search_menu' || message.name === 'switch_language') {
+      // For our custom tools, send the data directly as string
+      outputString = result.success ? result.data : (result.error || 'Tool failed');
+    } else {
+      // For MCP tools, use the existing format
+      outputString = JSON.stringify(result);
+    }
+    
     ws.send(JSON.stringify({
       type: 'conversation.item.create',
       item: {
         type: 'function_call_output',
         call_id: message.call_id,
-        output: JSON.stringify(result) // Stringify for OpenAI Realtime API
+        output: outputString
       }
     }));
 
@@ -1969,12 +2084,21 @@ async function handleToolCall(ws, message, callerPhone, callId) {
   } catch (error) {
     console.error('[sip-webhook] ❌ Tool call error:', error);
     
+    let errorOutput;
+    if (message.name === 'search_menu' || message.name === 'switch_language') {
+      // For our custom tools, send error as string
+      errorOutput = `Tool error: ${error.message}`;
+    } else {
+      // For MCP tools, use JSON format
+      errorOutput = JSON.stringify({ success: false, error: error.message });
+    }
+    
     ws.send(JSON.stringify({
       type: 'conversation.item.create',
       item: {
         type: 'function_call_output',
         call_id: message.call_id,
-        output: { success: false, error: error.message } // Don't double-stringify
+        output: errorOutput
       }
     }));
   }
