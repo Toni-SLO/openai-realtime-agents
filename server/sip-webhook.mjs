@@ -589,7 +589,7 @@ async function addHumanToConference(callId, problemSummary) {
 
 // Unified instructions are now loaded from shared file
 
-// Tool definitions
+// Tool definitions with MCP schema validation
 const FANCITA_RESERVATION_TOOL = {
   type: 'function',
   name: 's6792596_fancita_rezervation_supabase',
@@ -609,6 +609,37 @@ const FANCITA_RESERVATION_TOOL = {
     required: ['name', 'date', 'time', 'guests_number', 'tel', 'source_id']
   }
 };
+
+// MCP Schema validation function
+function validateMCPParameters(toolName, parameters) {
+  const toolSchemas = {
+    's6792596_fancita_rezervation_supabase': {
+      required: ['name', 'date', 'time', 'guests_number']
+    },
+    's6798488_fancita_order_supabase': {
+      required: ['name', 'date', 'delivery_time', 'delivery_type', 'delivery_address', 'items', 'total']
+    }
+  };
+  
+  const schema = toolSchemas[toolName];
+  if (!schema) return { valid: true }; // Unknown tool, skip validation
+  
+  const missing = [];
+  const invalid = [];
+  
+  for (const field of schema.required) {
+    const value = parameters[field];
+    if (value === undefined || value === null || value === '' || value === '—') {
+      missing.push(field);
+    }
+  }
+  
+  return {
+    valid: missing.length === 0,
+    missing: missing,
+    invalid: invalid
+  };
+}
 
 const FANCITA_ORDER_TOOL = {
   type: 'function',
@@ -1882,6 +1913,35 @@ async function handleToolCall(ws, message, callerPhone, callId) {
       
       result = { success: true, data: switchMessage };
     } else if (message.name === 's6792596_fancita_rezervation_supabase' || message.name === 's6798488_fancita_order_supabase') {
+      // CRITICAL: Validate MCP parameters before calling
+      const args = JSON.parse(message.arguments);
+      const validation = validateMCPParameters(message.name, args);
+      
+      if (!validation.valid) {
+        console.error('[sip-webhook] ❌ MCP Validation failed:', validation);
+        console.error('[sip-webhook] 🔍 Missing fields:', validation.missing);
+        console.error('[sip-webhook] 🔍 Provided args:', args);
+        
+        // Return validation error to agent
+        const errorMessage = `VALIDATION ERROR: Missing required fields: ${validation.missing.join(', ')}. Please collect all required information before submitting the ${message.name.includes('rezervation') ? 'reservation' : 'order'}.`;
+        result = { success: false, error: errorMessage };
+        
+        // Send error result immediately and return
+        const outputString = JSON.stringify(result);
+        ws.send(JSON.stringify({
+          type: 'conversation.item.create',
+          item: {
+            id: message.call_id,
+            type: 'function_call_output',
+            call_id: message.call_id,
+            output: outputString
+          }
+        }));
+        return; // Stop processing - do not call MCP
+      }
+      
+      console.log('[sip-webhook] ✅ MCP Validation passed for', message.name);
+      
       // Try Next.js MCP API first (proper MCP protocol), then fallback to direct Make.com
       const nextjsApiUrl = process.env.NEXTJS_API_URL || 'http://localhost:3000';
       const mcpApiUrl = `${nextjsApiUrl}/api/mcp`;
