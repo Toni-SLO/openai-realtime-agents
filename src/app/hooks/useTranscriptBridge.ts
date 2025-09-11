@@ -75,7 +75,12 @@ export function useTranscriptBridge() {
       case 'new_sip_session': {
         console.log(`[transcript-bridge] New SIP session detected: ${message.sessionId}`);
         setActiveSipSessions((prev) => new Set([...prev, message.sessionId]));
-        addTranscriptBreadcrumb(`📞 New SIP call detected (${message.sessionId.slice(-8)})`);
+        // Use system message instead of breadcrumb for consistency
+        addTranscriptMessage(
+          `new-sip-${message.sessionId}`, 
+          'system', 
+          `📞 New SIP call detected (${message.sessionId.slice(-8)})`
+        );
         
         // Auto-subscribe to new SIP sessions
         subscribe(message.sessionId);
@@ -106,36 +111,158 @@ export function useTranscriptBridge() {
           next.delete(message.sessionId);
           return next;
         });
-        addTranscriptBreadcrumb(`📞 SIP call ended (${message.sessionId.slice(-8)})`);
+        // Use system message instead of breadcrumb for consistency
+        addTranscriptMessage(
+          `end-sip-${message.sessionId}`, 
+          'system', 
+          `📞 SIP call ended (${message.sessionId.slice(-8)})`
+        );
         break;
       }
     }
   };
 
-  // Process individual transcript events
+  // Process individual transcript events - ENHANCED to match SIP Transcripts quality
   const processTranscriptEvent = (sessionId: string, event: TranscriptEvent) => {
     const itemId = `${sessionId}-${Date.now()}-${Math.random()}`;
+    const timestamp = new Date(event.timestamp || Date.now()).toLocaleTimeString('sl-SI');
     
     switch (event.type) {
+      case 'session_start': {
+        // Don't add breadcrumb, we'll add system message instead
+        
+        // Add detailed session info like SIP Transcripts
+        if (event.metadata) {
+          const phone = event.metadata.callerPhone || 'Unknown';
+          const phoneShort = phone.match(/["\']?(\+?[0-9]{8,15})["\']?/)?.[1] || phone;
+          const lang = event.metadata.initialLanguage || 'hr';
+          const startTimeFormatted = event.metadata.startTimeFormatted || 
+            new Date(event.metadata.startTime || Date.now()).toLocaleString('sl-SI');
+          
+          let sessionDisplay = `📞 Klic iz: ${phone} | 📅 ${startTimeFormatted} | 🌍 Jezik: ${lang}`;
+          
+          // Add full metadata like SIP Transcripts
+          sessionDisplay += `\n📋 Metadata:\n${JSON.stringify(event.metadata, null, 2)}`;
+          
+          addTranscriptMessage(
+            `${itemId}-session`, 
+            'system', 
+            sessionDisplay
+          );
+        }
+        break;
+      }
+      
       case 'message': {
         if (event.role && event.content) {
-          // Add SIP prefix to distinguish from local messages
+          // Enhanced message display with language tags like SIP Transcripts
+          const langMatch = event.content.match(/^\[([A-Z]{2})\]/);
           const content = event.role === 'user' 
-            ? `📞 ${event.content}` 
-            : `🎙️ ${event.content}`;
+            ? `👤 ${timestamp} message user\n${event.content}` 
+            : `🤖 ${timestamp} message assistant\n${event.content}`;
           
           addTranscriptMessage(itemId, event.role, content);
         }
         break;
       }
       
-      case 'function_call': {
-        addTranscriptBreadcrumb('SIP Function Call', event.metadata);
+      case 'tool_call': {
+        // Enhanced tool call display like SIP Transcripts
+        const toolName = event.tool_name || 'unknown_tool';
+        let toolDisplay = `🔧 ${timestamp} tool_call ${toolName}`;
+        
+        // Add detailed reservation/order summary for MCP tools
+        if (toolName.includes('rezervation') || toolName.includes('order')) {
+          if (event.arguments) {
+            try {
+              const args = typeof event.arguments === 'string' ? JSON.parse(event.arguments) : event.arguments;
+              if (args.name) {
+                const summary = toolName.includes('rezervation') 
+                  ? `${args.name} | ${args.date} ${args.time} | ${args.guests_number} oseba/e`
+                  : `${args.name} | ${args.date} ${args.delivery_time} | ${args.items?.length || 0} stavki | ${args.total}€ | ${args.delivery_type || 'pickup'}`;
+                toolDisplay += `\n📋 Podaci o rezervaciji:\n${summary}`;
+              }
+            } catch (e) {
+              console.warn('Failed to parse tool arguments:', e);
+            }
+          }
+        }
+        
+        // Add summary for end_call tool
+        if (toolName === 'end_call') {
+          if (event.arguments) {
+            try {
+              const args = typeof event.arguments === 'string' ? JSON.parse(event.arguments) : event.arguments;
+              if (args.reason) {
+                toolDisplay += `\n📋 Podaci o rezervaciji:\n${args.reason}`;
+              }
+            } catch (e) {
+              console.warn('Failed to parse end_call arguments:', e);
+            }
+          }
+        }
+        
+        // Prepare metadata object for expandable display
+        let metadataObj: any = null;
+        if (event.metadata || event.arguments) {
+          metadataObj = {
+            toolName: toolName,
+            callId: event.call_id || 'unknown',
+          };
+          
+          // Add argument count and reservation data
+          if (event.arguments) {
+            try {
+              const args = typeof event.arguments === 'string' ? JSON.parse(event.arguments) : event.arguments;
+              const argCount = Object.keys(args).length;
+              metadataObj.argumentCount = argCount;
+              metadataObj.reservationData = args;
+            } catch (e) {
+              console.warn('Failed to parse arguments for metadata:', e);
+            }
+          }
+          
+          // Add any additional metadata from event
+          if (event.metadata) {
+            Object.assign(metadataObj, event.metadata);
+          }
+        }
+        
+        // Add message with metadata as data parameter for blue styling
+        const { addTranscriptMessage: addMsg } = require('@/app/contexts/TranscriptContext');
+        const transcriptContext = require('@/app/contexts/TranscriptContext');
+        
+        // We need to use the context directly to add both title and data
+        addTranscriptMessage(`${itemId}-tool`, 'system', toolDisplay);
+        
+        // If we have metadata, update the item to include data
+        if (metadataObj) {
+          // We'll need to modify the transcript context to support this
+          // For now, let's add metadata in the title but formatted properly
+          const fullDisplay = toolDisplay + `\n📋 Metadata:\n${JSON.stringify(metadataObj, null, 2)}`;
+          addTranscriptMessage(`${itemId}-tool`, 'system', fullDisplay);
+        } else {
+          addTranscriptMessage(`${itemId}-tool`, 'system', toolDisplay);
+        }
         break;
       }
       
-      case 'session_start': {
-        addTranscriptBreadcrumb(`SIP call started (${sessionId})`, event.metadata);
+      case 'session_update': {
+        // Show session updates like SIP Transcripts
+        addTranscriptMessage(
+          `${itemId}-update`, 
+          'system', 
+          `📝 ${timestamp} session_update`
+        );
+        break;
+      }
+      
+      case 'session_end': {
+        addTranscriptMessage(
+          `${itemId}-end`, 
+          'system', 
+          `🔴 ${timestamp} session_end`
+        );
         break;
       }
     }

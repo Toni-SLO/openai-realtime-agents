@@ -68,7 +68,7 @@ export interface GuardrailResultType {
 export interface TranscriptItem {
   itemId: string;
   type: "MESSAGE" | "BREADCRUMB";
-  role?: "user" | "assistant";
+  role?: "user" | "assistant" | "system";
   title?: string;
   data?: Record<string, any>;
   expanded: boolean;
@@ -105,7 +105,7 @@ export interface ServerEvent {
     status?: string;
     name?: string;
     arguments?: string;
-    role?: "user" | "assistant";
+    role?: "user" | "assistant" | "system";
     content?: {
       type?: string;
       transcript?: string | null;

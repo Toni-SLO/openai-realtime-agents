@@ -8,6 +8,19 @@ import { useTranscript } from "@/app/contexts/TranscriptContext";
 import { DownloadIcon, ClipboardCopyIcon } from "@radix-ui/react-icons";
 import { GuardrailChip } from "./GuardrailChip";
 
+// Helper function to get event icon like SIP Transcripts
+function getEventIcon(item: TranscriptItem): string {
+  if (item.type === 'MESSAGE') {
+    return item.role === 'user' ? '👤' : item.role === 'assistant' ? '🤖' : '📝';
+  } else if (item.type === 'BREADCRUMB') {
+    if (item.title?.includes('SIP call')) return '📞';
+    if (item.title?.includes('tool_call')) return '🔧';
+    if (item.title?.includes('session')) return '📝';
+    return '📋';
+  }
+  return '📝';
+}
+
 export interface TranscriptProps {
   userText: string;
   setUserText: (val: string) => void;
@@ -117,95 +130,69 @@ function Transcript({
               return null;
             }
 
-            if (type === "MESSAGE") {
-              const isUser = role === "user";
-              const containerClasses = `flex justify-end flex-col ${
-                isUser ? "items-end" : "items-start"
-              }`;
-              const bubbleBase = `max-w-lg p-3 ${
-                isUser ? "bg-gray-900 text-gray-100" : "bg-gray-100 text-black"
-              }`;
-              const isBracketedMessage =
-                title.startsWith("[") && title.endsWith("]");
-              const messageStyle = isBracketedMessage
-                ? 'italic text-gray-400'
-                : '';
-              const displayTitle = isBracketedMessage
-                ? title.slice(1, -1)
-                : title;
-
-              return (
-                <div key={itemId} className={containerClasses}>
-                  <div className="max-w-lg">
-                    <div
-                      className={`${bubbleBase} rounded-t-xl ${
-                        guardrailResult ? "" : "rounded-b-xl"
-                      }`}
-                    >
-                      <div
-                        className={`text-xs ${
-                          isUser ? "text-gray-400" : "text-gray-500"
-                        } font-mono`}
-                      >
-                        {timestamp}
-                      </div>
-                      <div className={`whitespace-pre-wrap ${messageStyle}`}>
-                        <ReactMarkdown>{displayTitle}</ReactMarkdown>
-                      </div>
-                    </div>
-                    {guardrailResult && (
-                      <div className="bg-gray-200 px-3 py-2 rounded-b-xl">
-                        <GuardrailChip guardrailResult={guardrailResult} />
-                      </div>
-                    )}
-                  </div>
-                </div>
-              );
-            } else if (type === "BREADCRUMB") {
-              return (
-                <div
-                  key={itemId}
-                  className="flex flex-col justify-start items-start text-gray-500 text-sm"
-                >
-                  <span className="text-xs font-mono">{timestamp}</span>
-                  <div
-                    className={`whitespace-pre-wrap flex items-center font-mono text-sm text-gray-800 ${
-                      data ? "cursor-pointer" : ""
-                    }`}
-                    onClick={() => data && toggleTranscriptItemExpand(itemId)}
-                  >
-                    {data && (
-                      <span
-                        className={`text-gray-400 mr-1 transform transition-transform duration-200 select-none font-mono ${
-                          expanded ? "rotate-90" : "rotate-0"
-                        }`}
-                      >
-                        ▶
-                      </span>
-                    )}
-                    {title}
-                  </div>
-                  {expanded && data && (
-                    <div className="text-gray-800 text-left">
-                      <pre className="border-l-2 ml-1 border-gray-200 whitespace-pre-wrap break-words font-mono text-xs mb-2 mt-2 pl-2">
-                        {JSON.stringify(data, null, 2)}
-                      </pre>
-                    </div>
+            // Use SIP Transcripts design for all items
+            return (
+              <div
+                key={itemId}
+                className="border-l-4 border-gray-200 pl-4 py-2"
+              >
+                {/* Header with event info like SIP Transcripts */}
+                <div className="flex items-center gap-2 text-sm text-gray-600 mb-1">
+                  <span>{getEventIcon(item)}</span>
+                  <span>{timestamp}</span>
+                  <span className="font-mono text-xs bg-gray-100 px-2 py-1 rounded">
+                    {type.toLowerCase()}
+                  </span>
+                  {role && (
+                    <span className="text-xs bg-blue-100 px-2 py-1 rounded">
+                      {role}
+                    </span>
                   )}
                 </div>
-              );
-            } else {
-              // Fallback if type is neither MESSAGE nor BREADCRUMB
-              return (
-                <div
-                  key={itemId}
-                  className="flex justify-center text-gray-500 text-sm italic font-mono"
-                >
-                  Unknown item type: {type}{" "}
-                  <span className="ml-2 text-xs">{timestamp}</span>
-                </div>
-              );
-            }
+                
+                {/* Content */}
+                {title && (
+                  <div className="text-gray-800 bg-gray-50 p-2 rounded text-sm">
+                    {type === 'MESSAGE' ? (
+                      <div className="whitespace-pre-wrap">
+                        <ReactMarkdown>{title}</ReactMarkdown>
+                      </div>
+                    ) : (
+                      <pre className="whitespace-pre-wrap font-mono text-xs">
+                        {title}
+                      </pre>
+                    )}
+                  </div>
+                )}
+
+                {/* Guardrail result */}
+                {guardrailResult && (
+                  <div className="mt-2 p-2 bg-yellow-50 rounded border border-yellow-200">
+                    <GuardrailChip guardrailResult={guardrailResult} />
+                  </div>
+                )}
+
+                {/* Expandable data like SIP Transcripts */}
+                {data && (
+                  <div className="mt-2 text-xs bg-blue-50 p-2 rounded border-l-2 border-blue-200">
+                    <div 
+                      className="font-semibold text-blue-700 mb-1 cursor-pointer flex items-center"
+                      onClick={() => toggleTranscriptItemExpand(itemId)}
+                    >
+                      <span className={`mr-1 transform transition-transform duration-200 ${
+                        expanded ? "rotate-90" : "rotate-0"
+                      }`}>▶</span>
+                      📋 Metadata:
+                    </div>
+                    {expanded && (
+                      <pre className="text-blue-600 font-mono">
+                        {JSON.stringify(data, null, 2)}
+                      </pre>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
           })}
         </div>
       </div>

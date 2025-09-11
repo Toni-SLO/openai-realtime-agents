@@ -14,7 +14,7 @@ type TranscriptContextValue = {
   transcriptItems: TranscriptItem[];
   addTranscriptMessage: (
     itemId: string,
-    role: "user" | "assistant",
+    role: "user" | "assistant" | "system",
     text: string,
     isHidden?: boolean,
   ) => void;

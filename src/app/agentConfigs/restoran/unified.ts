@@ -8,12 +8,13 @@ import {
   FANCITA_LANGUAGE_TOOL
 } from '../shared/instructions';
 import { getMenuForAgent, findMenuItem } from '../shared/menu';
+import { replaceInstructionVariablesSync } from '../shared/instructionVariables';
 
 // Unified agent with all restaurant capabilities
 export const unifiedRestoranAgent = new RealtimeAgent({
   name: 'fancita_restoran',
   voice: 'marin',
-  instructions: FANCITA_UNIFIED_INSTRUCTIONS,
+  instructions: replaceInstructionVariablesSync(FANCITA_UNIFIED_INSTRUCTIONS),
   tools: [
     // Direct MCP tool for reservations (if MCP_SERVER_URL is configured)
     ...(process.env.MCP_SERVER_URL ? [{
@@ -221,9 +222,12 @@ export const unifiedRestoranAgent = new RealtimeAgent({
             const searchResults = findMenuItem(input.query, language);
             
             if (searchResults.length === 0) {
-              const errorResult = `Ni najdenih rezultatov za "${input.query}". Poskusite z drugimi izrazi ali pokličite search_menu z get_full_menu: true za celoten meni.`;
-              console.log('[unified-agent] 🔧 Returning error result:', errorResult);
-              return errorResult;
+              // NOVA LOGIKA: Če ni rezultatov, vrni CELOTEN menu v trenutnem jeziku
+              console.log('[unified-agent] 🔧 No results found, returning full menu instead');
+              const fullMenu = getMenuForAgent(language);
+              const fallbackResult = `Ni najdenih specifičnih rezultatov za "${input.query}". Tukaj je celoten meni restavracije Fančita v ${language} jeziku:\n\n${fullMenu}\n\nProsim, poiščite želeno jed v zgornjem meniju.`;
+              console.log('[unified-agent] 🔧 Returning fallback full menu result (length):', fallbackResult.length);
+              return fallbackResult;
             }
             
             let resultText = `Rezultati iskanja za "${input.query}":\n\n`;

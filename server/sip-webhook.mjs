@@ -4,6 +4,7 @@ import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
+import settings from './settings.js';
 
 // Get the project root directory (one level up from server/)
 const __filename = fileURLToPath(import.meta.url);
@@ -614,10 +615,10 @@ const FANCITA_RESERVATION_TOOL = {
 function validateMCPParameters(toolName, parameters) {
   const toolSchemas = {
     's6792596_fancita_rezervation_supabase': {
-      required: ['name', 'date', 'time', 'guests_number']
+      required: settings.validation.requiredReservationFields
     },
     's6798488_fancita_order_supabase': {
-      required: ['name', 'date', 'delivery_time', 'delivery_type', 'delivery_address', 'items', 'total']
+      required: settings.validation.requiredOrderFields
     }
   };
   
@@ -627,18 +628,91 @@ function validateMCPParameters(toolName, parameters) {
   const missing = [];
   const invalid = [];
   
+  // 1. Check for missing required fields
   for (const field of schema.required) {
     const value = parameters[field];
-    if (value === undefined || value === null || value === '' || value === '—') {
+    if (settings.validation.forbiddenValues.includes(value)) {
       missing.push(field);
     }
   }
   
+  // 2. Business rules validation (only if no missing fields)
+  if (missing.length === 0) {
+    // RESERVATION VALIDATION
+    if (toolName === 's6792596_fancita_rezervation_supabase') {
+      // Validate time format and business hours
+      const time = parameters.time;
+      if (time && !isValidReservationTime(time)) {
+        invalid.push(`time: "${time}" - ${settings.businessHours.reservations.description}`);
+      }
+      
+      // Validate number of guests
+      const guests = parseInt(parameters.guests_number);
+      if (isNaN(guests) || guests < settings.guestLimits.minGuests) {
+        invalid.push(`guests_number: "${parameters.guests_number}" - ${settings.guestLimits.minGuestsMessage}`);
+      } else if (guests > settings.guestLimits.maxGuests) {
+        invalid.push(`guests_number: "${guests}" - ${settings.guestLimits.maxGuestsMessage}`);
+      }
+    }
+    
+    // ORDER VALIDATION  
+    if (toolName === 's6798488_fancita_order_supabase') {
+      // Validate delivery time format and business hours
+      const deliveryTime = parameters.delivery_time;
+      if (deliveryTime && !isValidDeliveryTime(deliveryTime)) {
+        invalid.push(`delivery_time: "${deliveryTime}" - ${settings.businessHours.delivery.description}`);
+      }
+      
+      // Validate total is positive
+      const total = parseFloat(parameters.total);
+      if (isNaN(total) || total < settings.validation.minOrderTotal) {
+        invalid.push(`total: "${parameters.total}" - ${settings.validation.minOrderTotalMessage}`);
+      }
+      
+      // Validate items array
+      if (!Array.isArray(parameters.items) || parameters.items.length === 0) {
+        invalid.push(`items: ${settings.validation.messages.emptyItemsArray}`);
+      }
+    }
+  }
+  
   return {
-    valid: missing.length === 0,
+    valid: missing.length === 0 && invalid.length === 0,
     missing: missing,
     invalid: invalid
   };
+}
+
+// Helper function to validate reservation time (uses settings)
+function isValidReservationTime(timeStr) {
+  const timeMatch = timeStr.match(settings.validation.timeFormatRegex);
+  if (!timeMatch) return false;
+  
+  const hours = parseInt(timeMatch[1]);
+  const minutes = parseInt(timeMatch[2]);
+  
+  if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return false;
+  
+  const { startHour, endHour } = settings.businessHours.reservations;
+  if (hours < startHour || hours > endHour) return false;
+  
+  return true;
+}
+
+// Helper function to validate delivery time (uses settings)
+function isValidDeliveryTime(timeStr) {
+  const timeMatch = timeStr.match(settings.validation.timeFormatRegex);
+  if (!timeMatch) return false;
+  
+  const hours = parseInt(timeMatch[1]);
+  const minutes = parseInt(timeMatch[2]);
+  
+  if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return false;
+  
+  const { startHour, endHour } = settings.businessHours.delivery;
+  if (hours < startHour || hours > endHour) return false;
+  
+  return true;
 }
 
 const FANCITA_ORDER_TOOL = {
@@ -1924,12 +1998,32 @@ async function handleToolCall(ws, message, callerPhone, callId) {
       const validation = validateMCPParameters(message.name, args);
       
       if (!validation.valid) {
-        console.error('[sip-webhook] ❌ MCP Validation failed:', validation);
-        console.error('[sip-webhook] 🔍 Missing fields:', validation.missing);
-        console.error('[sip-webhook] 🔍 Provided args:', args);
+        if (settings.debug.logValidation) {
+          console.error('[sip-webhook] ❌ MCP Validation failed:', validation);
+          console.error('[sip-webhook] 🔍 Missing fields:', validation.missing);
+          console.error('[sip-webhook] 🔍 Invalid fields:', validation.invalid);
+          if (settings.debug.verboseErrors) {
+            console.error('[sip-webhook] 🔍 Provided args:', args);
+          }
+        }
         
-        // Return validation error to agent
-        const errorMessage = `VALIDATION ERROR: Missing required fields: ${validation.missing.join(', ')}. Please collect all required information before submitting the ${message.name.includes('rezervation') ? 'reservation' : 'order'}.`;
+        // Build comprehensive error message using settings
+        const templates = settings.validation.errorTemplates;
+        let errorMessage = templates.validationError;
+        const errors = [];
+        
+        if (validation.missing.length > 0) {
+          errors.push(`${templates.missingFields}${validation.missing.join(', ')}`);
+        }
+        
+        if (validation.invalid.length > 0) {
+          errors.push(`${templates.invalidValues}${validation.invalid.join('; ')}`);
+        }
+        
+        errorMessage += errors.join('. ');
+        const entityType = message.name.includes('rezervation') ? templates.reservation : templates.order;
+        errorMessage += `. ${templates.correctIssues}${entityType}.`;
+        
         result = { success: false, error: errorMessage };
         
         // Send error result immediately and return
@@ -1946,7 +2040,9 @@ async function handleToolCall(ws, message, callerPhone, callId) {
         return; // Stop processing - do not call MCP
       }
       
-      console.log('[sip-webhook] ✅ MCP Validation passed for', message.name);
+      if (settings.debug.logValidation) {
+        console.log('[sip-webhook] ✅ MCP Validation passed for', message.name);
+      }
       
       // Try Next.js MCP API first (proper MCP protocol), then fallback to direct Make.com
       const nextjsApiUrl = process.env.NEXTJS_API_URL || 'http://localhost:3000';

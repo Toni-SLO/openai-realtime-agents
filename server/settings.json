@@ -1,0 +1,75 @@
+{
+  "businessHours": {
+    "reservations": {
+      "startHour": 12,
+      "endHour": 22,
+      "description": "Rezervacije so možne od 12:00 do 22:00"
+    },
+    "delivery": {
+      "startHour": 12,
+      "endHour": 22,
+      "description": "Dostava/prevzem možen od 12:00 do 22:00"
+    }
+  },
+  "guestLimits": {
+    "maxGuests": 8,
+    "minGuests": 1,
+    "maxGuestsMessage": "Maksimalno 8 oseb. Za večje skupine kontaktirajte osebje",
+    "minGuestsMessage": "Število oseb mora biti pozitivno število"
+  },
+  "validation": {
+    "minOrderTotal": 1.00,
+    "minOrderTotalMessage": "Skupna cena mora biti pozitivna",
+    "requiredReservationFields": ["name", "date", "time", "guests_number"],
+    "requiredOrderFields": ["name", "date", "delivery_time", "delivery_type", "delivery_address", "items", "total"],
+    "forbiddenValues": ["", "—", "-", "User", "Guest", null],
+    "timeFormatRegex": "^(\\d{1,2}):(\\d{2})$",
+    "messages": {
+      "emptyItemsArray": "Naročilo mora vsebovati vsaj eno jed",
+      "invalidItemsArray": "Seznam jedi mora biti veljaven",
+      "noItems": "Ni dodanih jedi v naročilo"
+    },
+    "errorTemplates": {
+      "validationError": "VALIDATION ERROR: ",
+      "missingFields": "Missing required fields: ",
+      "invalidValues": "Invalid values: ",
+      "correctIssues": "Please correct these issues before submitting the ",
+      "reservation": "reservation",
+      "order": "order"
+    }
+  },
+  "staff": {
+    "manager": {
+      "name": "Paulo",
+      "title": "šef",
+      "message": "Povezujem vas s šefom Paulom"
+    },
+    "managerFemale": {
+      "name": "Klaudija",
+      "title": "šefica",
+      "message": "Povezujem vas s šefico Klaudijo"
+    },
+    "staffKeywords": {
+      "sl": ["paulo", "klaudija", "šef", "šefica", "vodja", "manager", "osebje", "staff"],
+      "hr": ["paulo", "klaudija", "šef", "šefica", "vodja", "manager", "osoblje"],
+      "en": ["paulo", "klaudija", "manager", "boss", "staff", "supervisor"]
+    }
+  },
+  "handoffMessages": {
+    "largeGroup": {
+      "sl": "Oprostite, po telefonu lahko rezerviram največ za 10 oseb. Za {count} oseb potrebujete osebni dogovor z osebjem.",
+      "hr": "Oprostite, preko telefona mogu rezervirati maksimalno za 10 osoba. Za {count} osoba potreban je osobni dogovor s osobljem.",
+      "en": "Sorry, I can only make phone reservations for up to 10 people. For {count} people, you need a personal arrangement with our staff.",
+      "de": "Entschuldigung, ich kann telefonisch nur für maximal 10 Personen reservieren. Für {count} Personen benötigen Sie eine persönliche Absprache mit unserem Personal.",
+      "it": "Mi dispiace, posso prenotare telefonicamente solo per massimo 10 persone. Per {count} persone serve un accordo personale con il nostro staff."
+    },
+    "handoffAnnouncement": "Naše osebje vas bo poklicalo za dogovor.",
+    "specialRequests": "Za posebne zahteve vas povezujem z osebjem",
+    "generalStaff": "Povezujem vas z osebjem"
+  },
+  "debug": {
+    "logValidation": true,
+    "logBusinessRules": true,
+    "verboseErrors": true
+  }
+}
