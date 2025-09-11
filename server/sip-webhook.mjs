@@ -1164,7 +1164,10 @@ const server = http.createServer(async (req, res) => {
         type: 'realtime',
         model: MODEL,
         audio: {
-          output: { voice: VOICE }
+          output: { 
+            voice: VOICE,
+            format: SIP_CODEC // g711_ulaw for SIP compatibility
+          }
         }
       };
 
@@ -1355,6 +1358,7 @@ async function processCall(callId, event, callerFrom, callerPhone) {
           const importantTypes = [
             'conversation.item.input_audio_transcription.completed',
             'response.output_audio_transcript.done',
+            'response.output_audio.delta',
             'response.function_call_arguments.done',
             'conversation.item.created',
             'error',
@@ -1370,13 +1374,14 @@ async function processCall(callId, event, callerFrom, callerPhone) {
             // User speech completed - log only once with metadata
             console.log('[sip-webhook] 🔄 User transcript received:', message.transcript);
             
+            const currentLang = callLanguages.get(callId) || 'hr';
             logTranscriptEvent(callId, {
               type: 'message',
               role: 'user',
-              content: message.transcript,
+              content: `[${currentLang.toUpperCase()}] ${message.transcript}`,
               timestamp: new Date().toISOString(),
               metadata: {
-                currentLanguage: callLanguages.get(callId) || 'hr',
+                currentLanguage: currentLang,
                 transcriptionModel: 'gpt-4o-mini-transcribe',
                 transcriptionComplete: true
               }
@@ -1421,26 +1426,74 @@ async function processCall(callId, event, callerFrom, callerPhone) {
                 }
               });
             }
+          } else if (message.type === 'response.output_audio.delta') {
+            // CRITICAL: Handle audio output from OpenAI - this was MISSING!
+            console.log('[sip-webhook] 🔊 AUDIO DELTA EVENT RECEIVED');
+            const audioData = message.delta;
+            if (audioData) {
+              console.log('[sip-webhook] 🔊 Audio delta received, length:', audioData.length);
+              
+              // Forward audio to Twilio via WebSocket
+              if (ws && ws.readyState === WebSocket.OPEN) {
+                try {
+                  const buf = Buffer.from(audioData, 'base64');
+                  const frameSize = 160; // 20ms @ 8kHz, 1 byte/sample (G.711 µ-law)
+                  
+                  for (let i = 0; i < buf.length; i += frameSize) {
+                    const chunk = buf.subarray(i, i + frameSize);
+                    const chunkB64 = chunk.toString('base64');
+                    
+                    ws.send(JSON.stringify({
+                      event: 'media',
+                      streamSid: callId, // Use callId as streamSid
+                      media: { payload: chunkB64 }
+                    }));
+                  }
+                  
+                  console.log('[sip-webhook] 🔊 Audio forwarded to Twilio, frames:', Math.ceil(buf.length / frameSize));
+                } catch (error) {
+                  console.error('[sip-webhook] ❌ Audio forwarding error:', error);
+                }
+              } else {
+                console.warn('[sip-webhook] ⚠️ WebSocket not available for audio forwarding');
+              }
+            }
+            
           } else if (message.type === 'response.output_audio_transcript.done') {
             // Assistant speech completed
             const transcript = message.transcript || '';
             console.log('[sip-webhook] 🔄 Assistant transcript received:', transcript);
             
+            // DEBUG: Check for "Is that correct?" phrase
+            if (transcript.toLowerCase().includes('is that correct') || 
+                transcript.toLowerCase().includes('ali je pravilno') ||
+                transcript.toLowerCase().includes('je li to točno')) {
+              console.log('[sip-webhook] 🚨 DEBUG: CONFIRMATION QUESTION DETECTED IN TRANSCRIPT:', transcript);
+            }
+            
             // Do NOT detect language from assistant responses - only from user input
             
+            const currentLang = callLanguages.get(callId) || 'hr';
             logTranscriptEvent(callId, {
               type: 'message',
               role: 'assistant', 
-              content: transcript,
+              content: `[${currentLang.toUpperCase()}] ${transcript}`,
               timestamp: new Date().toISOString(),
               metadata: {
-                currentLanguage: callLanguages.get(callId) || 'hr',
+                currentLanguage: currentLang,
                 transcriptionModel: 'gpt-4o-mini-transcribe'
               }
             });
           } else if (message.type === 'response.function_call_arguments.done') {
             // Tool call completed - track it as pending
-            const parsedArgs = JSON.parse(message.arguments || '{}');
+            let parsedArgs;
+            try {
+              parsedArgs = JSON.parse(message.arguments || '{}');
+            } catch (parseError) {
+              console.error('[sip-webhook] ❌ JSON parse error for tool arguments:', parseError);
+              console.error('[sip-webhook] 🔍 Raw arguments:', message.arguments);
+              parsedArgs = {}; // Fallback to empty object
+            }
             
             // Track this tool call as pending
             if (!pendingToolResults.has(callId)) {
@@ -1723,33 +1776,56 @@ async function processCall(callId, event, callerFrom, callerPhone) {
     }
   }
 
-// Menu search functions (simplified versions)
-function searchMenuItems(query, language = 'hr') {
-  // Simplified menu data - you can expand this
-  const menuItems = [
-    { id: 'pizza_margherita', price: 10.00, translations: { hr: 'Pizza Margherita', sl: 'Pizza Margherita' } },
-    { id: 'pizza_nives', price: 12.00, translations: { hr: 'Pizza Nives', sl: 'Pizza Nives' } },
-    { id: 'pizza_quattro_formaggi', price: 11.00, translations: { hr: 'Pizza Quattro Formaggi', sl: 'Pizza Quattro Formaggi' } },
-    { id: 'dodatek_masline', price: 1.00, translations: { hr: 'Dodatek masline', sl: 'Dodatek masline' } },
-    { id: 'dodatek_prsut', price: 3.00, translations: { hr: 'Dodatek pršut', sl: 'Dodatek pršut' } }
-  ];
-  
-  const searchTerm = query.toLowerCase();
-  return menuItems.filter(item => {
-    const translation = item.translations[language] || item.translations.hr;
-    return translation.toLowerCase().includes(searchTerm) || 
-           item.id.toLowerCase().includes(searchTerm);
-  });
+// Menu search functions - USE NEXT.JS API FOR REAL MENU DATA
+async function searchMenuItems(query, language = 'hr') {
+  try {
+    const nextjsApiUrl = process.env.NEXTJS_API_URL || 'http://localhost:3000';
+    const response = await fetch(`${nextjsApiUrl}/api/menu-search`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        query: query,
+        language: language,
+        get_full_menu: false
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error(`Menu API error: ${response.status}`);
+    }
+
+    const result = await response.json();
+    return result.data || `Ni najdenih rezultatov za "${query}".`;
+  } catch (error) {
+    console.error('[sip-webhook] Menu search error:', error);
+    // Fallback to basic menu if API fails
+    return `Oprostite, trenutno ne morem dostopati do menija. Pokličite direktno restavracijo za informacije o meniju.`;
+  }
 }
 
-function getFullMenu(language = 'hr') {
-  const items = searchMenuItems('', language);
-  let menu = 'MENI RESTAVRACIJE FANČITA:\n\n';
-  items.forEach(item => {
-    const translation = item.translations[language] || item.translations.hr;
-    menu += `• ${translation} - ${item.price.toFixed(2)} €\n`;
-  });
-  return menu;
+async function getFullMenu(language = 'hr') {
+  try {
+    const nextjsApiUrl = process.env.NEXTJS_API_URL || 'http://localhost:3000';
+    const response = await fetch(`${nextjsApiUrl}/api/menu-search`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        query: '',
+        language: language,
+        get_full_menu: true
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error(`Menu API error: ${response.status}`);
+    }
+
+    const result = await response.json();
+    return result.data || 'Oprostite, trenutno ne morem prikazati menija.';
+  } catch (error) {
+    console.error('[sip-webhook] Full menu error:', error);
+    return 'Oprostite, trenutno ne morem dostopati do menija. Pokličite direktno restavracijo za informacije o meniju.';
+  }
 }
 
 // Tool call handler
@@ -1765,25 +1841,18 @@ async function handleToolCall(ws, message, callerPhone, callId) {
     if (message.name === 'search_menu') {
       console.log('[sip-webhook] 🔧 Handling search_menu tool');
       const args = JSON.parse(message.arguments);
-      const language = args.language || 'hr';
+      // Get current call language instead of defaulting to Croatian
+      const currentLanguage = callLanguages.get(callId) || 'hr';
+      const language = args.language || currentLanguage;
       
       if (args.get_full_menu) {
-        const fullMenu = getFullMenu(language);
+        const fullMenu = await getFullMenu(language);
         result = { success: true, data: fullMenu };
       } else if (args.query) {
-        const searchResults = searchMenuItems(args.query, language);
-        if (searchResults.length === 0) {
-          result = { success: false, error: `Ni najdenih rezultatov za "${args.query}".` };
-        } else {
-          let resultText = `Rezultati iskanja za "${args.query}":\n\n`;
-          searchResults.forEach(item => {
-            const translation = item.translations[language] || item.translations.hr;
-            resultText += `• ${translation} - ${item.price.toFixed(2)} €\n`;
-          });
-          result = { success: true, data: resultText };
-        }
+        const searchResults = await searchMenuItems(args.query, language);
+        result = { success: true, data: searchResults };
       } else {
-        const basicMenu = getFullMenu(language);
+        const basicMenu = await getFullMenu(language);
         result = { success: true, data: basicMenu };
       }
     } else if (message.name === 'switch_language') {
@@ -1805,7 +1874,11 @@ async function handleToolCall(ws, message, callerPhone, callId) {
       };
       
       const languageName = languageNames[languageCode] || languageCode;
-      const switchMessage = `🌍 JEZIK PREKLOPLJEN: ${languageCode.toUpperCase()} (${languageName})\n📝 Zaznane fraze: "${detectedPhrases}"\n✅ Transkripcijski model posodobljen na ${languageCode}`;
+      
+      // No need for complex contextual logic - let Maja (GPT-4o) handle context analysis herself
+      
+      // Simple language switch notification - let Maja handle the context herself
+      const switchMessage = `🌍 JEZIK PREKLOPLJEN: ${languageCode.toUpperCase()} (${languageName})\n📝 Zaznane fraze: "${detectedPhrases}"\n✅ Transkripcijski model posodobljen na ${languageCode}\n🤖 NAVODILO: Nadaljuj pogovor v jeziku ${languageName} iz konteksta prejšnjega pogovora. Ne sprašuj ponovno "Kako lahko pomagam?" ampak direktno nadaljuj z ustreznim vprašanjem glede na to, kar je gost že omenil.`;
       
       result = { success: true, data: switchMessage };
     } else if (message.name === 's6792596_fancita_rezervation_supabase' || message.name === 's6798488_fancita_order_supabase') {

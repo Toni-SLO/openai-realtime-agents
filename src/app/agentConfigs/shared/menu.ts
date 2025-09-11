@@ -1340,12 +1340,50 @@ export function findMenuItem(searchTerm: string, language: string = 'hr'): MenuI
   
   const results: MenuItem[] = [];
   
+  // Define category synonyms for better search
+  const categorySynonyms: { [key: string]: string[] } = {
+    'pizza': ['pizza', 'pica', 'pice', 'pizze'],
+    'pasta': ['pasta', 'testenine', 'špageti', 'pappardelle', 'njoki', 'penne'],
+    'appetizer': ['predjed', 'antipasti', 'starter', 'vorspeise'],
+    'soup': ['juha', 'zuppa', 'suppe', 'soep'],
+    'fish': ['riba', 'pesce', 'fisch', 'vis'],
+    'meat': ['meso', 'carne', 'fleisch', 'vlees'],
+    'salad': ['salata', 'solata', 'insalata', 'salat', 'salade'],
+    'dessert': ['desert', 'sladica', 'dolce', 'nachtisch', 'dessert']
+  };
+  
   FANCITA_MENU.forEach(category => {
+    const categoryTranslation = category.translations[targetLang as keyof typeof category.translations].toLowerCase();
+    
+    // Check if search term matches category or category synonyms
+    let categoryMatch = false;
+    if (categoryTranslation.includes(searchLower)) {
+      categoryMatch = true;
+    } else {
+      // Check synonyms
+      for (const [key, synonyms] of Object.entries(categorySynonyms)) {
+        if (synonyms.some(synonym => synonym.toLowerCase() === searchLower)) {
+          // Check if this category could match the synonym
+          if ((key === 'pizza' && categoryTranslation.includes('pizza')) ||
+              (key === 'pasta' && (category.id.includes('pasta') || categoryTranslation.includes('pasta'))) ||
+              (key === 'appetizer' && (category.id.includes('appetizer') || categoryTranslation.includes('predjed'))) ||
+              (key === 'soup' && (category.id.includes('soup') || categoryTranslation.includes('juha'))) ||
+              (key === 'fish' && (category.id.includes('fish') || categoryTranslation.includes('riba'))) ||
+              (key === 'meat' && (category.id.includes('meat') || categoryTranslation.includes('meso'))) ||
+              (key === 'salad' && (category.id.includes('salad') || categoryTranslation.includes('salat'))) ||
+              (key === 'dessert' && (category.id.includes('dessert') || categoryTranslation.includes('desert')))) {
+            categoryMatch = true;
+            break;
+          }
+        }
+      }
+    }
+    
     category.items.forEach(item => {
       const translation = item.translations[targetLang as keyof typeof item.translations].toLowerCase();
       
-      // Exact match or contains search term
-      if (translation.includes(searchLower)) {
+      // Match by item name or category match
+      if (translation.includes(searchLower) || categoryMatch) {
         results.push(item);
       }
     });
