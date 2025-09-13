@@ -77,8 +77,8 @@ wss.on('connection', (ws, req) => {
         
         // CRITICAL: Also write to file for SIP Transcripts UI
         try {
-          const fs = require('fs');
-          const path = require('path');
+          const fs = await import('fs');
+          const path = await import('path');
           
           const transcriptsDir = path.join(process.cwd(), 'server', 'logs', 'transcripts');
           if (!fs.existsSync(transcriptsDir)) {
