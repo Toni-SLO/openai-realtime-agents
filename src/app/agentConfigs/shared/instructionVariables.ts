@@ -17,9 +17,19 @@ const getSettingsFromServer = async () => {
   try {
     // V Node.js okolju (server-side) direktno importaj
     if (typeof window === 'undefined') {
-      // Uporabi relativno pot do server/settings.js
-      const settingsPath = require('path').join(process.cwd(), 'server', 'settings.js');
-      const settingsModule = await import(settingsPath);
+      // Uporabi relativno pot do server/settings.js (brez require)
+      const path = await import('path');
+      const { pathToFileURL } = await import('url');
+      
+      // Preveri, če smo že v server/ direktoriju
+      const cwd = process.cwd();
+      const isInServerDir = cwd.endsWith('server');
+      const settingsPath = isInServerDir 
+        ? path.join(cwd, 'settings.js')
+        : path.join(cwd, 'server', 'settings.js');
+        
+      const settingsURL = pathToFileURL(settingsPath).href;
+      const settingsModule = await import(settingsURL);
       const settings = settingsModule.default || settingsModule.settings;
       cachedSettings = settings;
       return settings;
