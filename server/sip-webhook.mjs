@@ -1219,7 +1219,26 @@ const server = http.createServer(async (req, res) => {
 
       // Extract caller info
       const callerFrom = event?.data?.sip_headers?.find(h => h.name === 'From')?.value || 'unknown';
-      const callerPhone = callerFrom.includes('+') ? callerFrom : '+' + callerFrom.match(/\d+/)?.[0] || callerFrom;
+      
+      // Extract clean phone number from SIP From header
+      // SIP From header can be like: "38641734134" <sip:+38641734134@pstn.twilio.com>;tag=...
+      // or: "+38641734134" <sip:+38641734134@pstn.twilio.com>;tag=...
+      let callerPhone = 'unknown';
+      if (callerFrom !== 'unknown') {
+        // Try to extract phone number from various SIP From header formats
+        const phoneMatch = callerFrom.match(/(?:^|["\s])(\+?\d{8,15})(?:["\s<>]|$)/);
+        if (phoneMatch) {
+          callerPhone = phoneMatch[1];
+          // Ensure phone number starts with +
+          if (!callerPhone.startsWith('+') && callerPhone.match(/^\d{8,15}$/)) {
+            callerPhone = '+' + callerPhone;
+          }
+        } else {
+          // Fallback: use original logic but log warning
+          console.warn(`[sip-webhook] ⚠️ Could not extract clean phone from SIP header: ${callerFrom}`);
+          callerPhone = callerFrom.includes('+') ? callerFrom : '+' + callerFrom.match(/\d+/)?.[0] || callerFrom;
+        }
+      }
       
       // Extract Twilio call SID from the event - try multiple possible locations
       const twilioCallSid = event?.data?.call_sid || event?.call_sid || event?.data?.sip_headers?.find(h => h.name === 'Call-ID')?.value || null;

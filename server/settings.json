@@ -12,9 +12,9 @@
     }
   },
   "guestLimits": {
-    "maxGuests": 8,
+    "maxGuests": 10,
     "minGuests": 1,
-    "maxGuestsMessage": "Maksimalno 8 oseb. Za večje skupine kontaktirajte osebje",
+    "maxGuestsMessage": "Maksimalno 10 oseb. Za večje skupine kontaktirajte osebje",
     "minGuestsMessage": "Število oseb mora biti pozitivno število"
   },
   "validation": {

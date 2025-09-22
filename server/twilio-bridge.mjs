@@ -96,7 +96,25 @@ wss.on('connection', (ws, req) => {
       const mediaFormat = data.start?.mediaFormat;
       console.log('[bridge][agents] twilio mediaFormat', mediaFormat);
       const g711Format = mapEncodingToG711(mediaFormat?.encoding);
-      const callerId = data.start?.customParameters?.from || '';
+      // Extract clean phone number from customParameters.from
+      // This can contain SIP header info like: "38641734134" <sip:+38641734134@pstn.twilio.com>;tag=...
+      let callerId = '';
+      const rawFrom = data.start?.customParameters?.from || '';
+      if (rawFrom) {
+        // Try to extract clean phone number from SIP From header format
+        const phoneMatch = rawFrom.match(/(?:^|["\s])(\+?\d{8,15})(?:["\s<>]|$)/);
+        if (phoneMatch) {
+          callerId = phoneMatch[1];
+          // Ensure phone number starts with +
+          if (!callerId.startsWith('+') && callerId.match(/^\d{8,15}$/)) {
+            callerId = '+' + callerId;
+          }
+        } else {
+          // Fallback: use original value but log warning
+          console.warn(`[bridge][agents] ⚠️ Could not extract clean phone from customParameters.from: ${rawFrom}`);
+          callerId = rawFrom;
+        }
+      }
       // zapomni si streamSid na socketu
       try { ws.__streamSid = streamSid; } catch {}
 

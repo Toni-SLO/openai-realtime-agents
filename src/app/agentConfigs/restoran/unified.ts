@@ -8,6 +8,29 @@ import {
   FANCITA_LANGUAGE_TOOL
 } from '../shared/instructions';
 import { getMenuForAgent, findMenuItem } from '../shared/menu';
+
+// Helper function to extract clean phone number from SIP header format
+function extractCleanPhone(rawPhone: string): string {
+  if (!rawPhone || rawPhone === '{{system__caller_id}}') {
+    return rawPhone;
+  }
+  
+  // Try to extract phone number from SIP From header format
+  // Can be like: "38641734134" <sip:+38641734134@pstn.twilio.com>;tag=...
+  const phoneMatch = rawPhone.match(/(?:^|["\s])(\+?\d{8,15})(?:["\s<>]|$)/);
+  if (phoneMatch) {
+    let cleanPhone = phoneMatch[1];
+    // Ensure phone number starts with +
+    if (!cleanPhone.startsWith('+') && cleanPhone.match(/^\d{8,15}$/)) {
+      cleanPhone = '+' + cleanPhone;
+    }
+    return cleanPhone;
+  }
+  
+  // Fallback: return original value
+  console.warn(`[unified-agent] ⚠️ Could not extract clean phone from: ${rawPhone}`);
+  return rawPhone;
+}
 import { replaceInstructionVariablesSync } from '../shared/instructionVariables';
 
 // Unified agent with all restaurant capabilities
@@ -33,7 +56,8 @@ export const unifiedRestoranAgent = new RealtimeAgent({
           console.log('[unified-agent] Reservation tool called with:', input);
           
           // Extract caller phone from context
-          const callerPhone = details?.context?.system__caller_id || '{{system__caller_id}}';
+          const rawCallerPhone = details?.context?.system__caller_id || '{{system__caller_id}}';
+          const callerPhone = extractCleanPhone(rawCallerPhone);
           const conversationId = details?.context?.system__conversation_id || '{{system__conversation_id}}';
           
           const reservationData = {
@@ -114,7 +138,8 @@ export const unifiedRestoranAgent = new RealtimeAgent({
           console.log('[unified-agent] Order tool called with:', input);
           
           // Extract caller phone from context
-          const callerPhone = details?.context?.system__caller_id || '{{system__caller_id}}';
+          const rawCallerPhone = details?.context?.system__caller_id || '{{system__caller_id}}';
+          const callerPhone = extractCleanPhone(rawCallerPhone);
           const conversationId = details?.context?.system__conversation_id || '{{system__conversation_id}}';
           
           // Menu items price lookup (from order.ts)
@@ -304,7 +329,8 @@ export const unifiedRestoranAgent = new RealtimeAgent({
           console.log('[unified-agent] Handoff tool called with:', input);
           
           // Extract caller phone from context  
-          const callerPhone = details?.context?.system__caller_id || '{{system__caller_id}}';
+          const rawCallerPhone = details?.context?.system__caller_id || '{{system__caller_id}}';
+          const callerPhone = extractCleanPhone(rawCallerPhone);
           const conversationId = details?.context?.system__conversation_id || '{{system__conversation_id}}';
           
           const handoffData = {
