@@ -139,15 +139,16 @@ export const FANCITA_UNIFIED_INSTRUCTIONS = `# Fančita Restaurant Agent
 - Dovoljeni edini defaulti:
   - tel = {{system__caller_id}}
   - source_id = {{system__conversation_id}}
-  - delivery_address = "-" **SAMO** če delivery_type = "pickup"
+  - delivery_address = "Fančita" **SAMO** če delivery_type = "pickup"
   - location = "terasa" (če ni izrecno zahtevano drugače)
   - notes = "—" (če ni posebnih želja)
 
 ### 5.3) Obvezno potrjevanje delivery_type
 - delivery_type mora biti **izrecno potrjen**
 - Če uporabnik reče "delivery" → takoj vprašaj za delivery_address
-- Če uporabnik reče "pickup" → delivery_address = "-"
+- Če uporabnik reče "pickup" → delivery_address = "Fančita"
 - Če delivery_type = "delivery" in delivery_address manjka → **NE KLIČI TOOLA**
+- Če delivery_type = "pickup" → delivery_address avtomatsko nastavi na "Fančita"
 
 ### 5.4) Potrditvene fraze (večjezično)
 **DA** = {
@@ -291,7 +292,7 @@ Vprašaj samo za manjkajoče podatke v tem vrstnem redu:
    - ES: "¿Quiere entrega a domicilio o recoger?"
 
    - Če delivery → takoj vprašaj za delivery_address
-   - Če pickup → delivery_address = "-"
+   - Če pickup → delivery_address = "Fančita"
 
 2. items – v jeziku uporabnika:
    - HR: "Recite narudžbu (jelo i količina)."
@@ -658,7 +659,7 @@ Ko gost sprašuje za "špagete", "špageti", "bolonjske špagete" ali "špageti 
   "date": "2025-01-15",
   "delivery_time": "19:00",
   "delivery_type": "pickup", 
-  "delivery_address": "-",
+  "delivery_address": "Fančita",
   "tel": "{{system__caller_id}}",
   "items": [
     {"name": "Pizza Quattro Formaggi", "qty": 1, "price": 11.00, "notes": "brez paradižnika"},
@@ -679,7 +680,7 @@ Ko gost sprašuje za "špagete", "špageti", "bolonjske špagete" ali "špageti 
   "date": "2025-01-15",
   "delivery_time": "18:00",
   "delivery_type": "pickup",
-  "delivery_address": "-",
+  "delivery_address": "Fančita",
   "tel": "{{system__caller_id}}",
   "items": [
     {"name":"Pizza Nives","qty":1}
@@ -702,7 +703,7 @@ export const FANCITA_ORDER_TOOL = {
       date: { type: 'string' as const, description: 'Delivery/pickup date in YYYY-MM-DD format' },
       delivery_time: { type: 'string' as const, description: 'Delivery/pickup time in HH:MM format (24h)' },
       delivery_type: { type: 'string' as const, description: 'Type of delivery: delivery or pickup', enum: ['delivery', 'pickup'] as const },
-      delivery_address: { type: 'string' as const, description: 'Delivery address (use "-" for pickup)' },
+      delivery_address: { type: 'string' as const, description: 'Delivery address (use "Fančita" for pickup)' },
       items: {
         type: 'array' as const,
         description: 'List of ordered items',

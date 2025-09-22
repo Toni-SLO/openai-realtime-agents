@@ -635,7 +635,7 @@ export async function POST(req: Request): Promise<Response> {
                           date: { type: 'string', description: 'Delivery/pickup date (YYYY-MM-DD)' },
                           delivery_time: { type: 'string', description: 'Delivery/pickup time (HH:MM)' },
                           delivery_type: { type: 'string', description: 'delivery or pickup' },
-                          delivery_address: { type: 'string', description: 'Delivery address or "-" for pickup' },
+                          delivery_address: { type: 'string', description: 'Delivery address or "Fančita" for pickup' },
                           items: {
                             type: 'array',
                             items: {
