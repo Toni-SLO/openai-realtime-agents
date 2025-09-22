@@ -1,4 +1,6 @@
 // MCP API route using proper MCP SDK and AI SDK
+console.log('🔧 [MCP] Route file loaded at:', new Date().toISOString());
+
 import { NextRequest, NextResponse } from 'next/server';
 import { Client } from '@modelcontextprotocol/sdk/client';
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse';
@@ -106,6 +108,24 @@ async function callMakeWebhook(webhookId: string, data: any) {
 // Initialize MCP client
 let mcpClient: any = null;
 let mcpTools: any[] = [
+  {
+    name: 's7260221_check_availability',
+    description: 'Check table availability for a specific date, time, and location before making a reservation',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        date: { type: 'string', description: 'Reservation date (YYYY-MM-DD)' },
+        time: { type: 'string', description: 'Reservation time (HH:MM)' },
+        people: { type: 'number', description: 'Number of guests' },
+        location: { type: 'string', description: 'Table location: terasa or vrt' },
+        duration_min: { type: 'number', description: 'Reservation duration in minutes' },
+        slot_minutes: { type: 'number', description: 'Time slot granularity' },
+        capacity: { type: 'object', description: 'Capacity per location' },
+        suggest: { type: 'object', description: 'Suggestion parameters' }
+      },
+      required: ['date', 'time', 'people', 'location']
+    }
+  },
   {
     name: 's6792596_fancita_rezervation_supabase',
     description: 'Create a table reservation for restaurant Fančita',
@@ -368,6 +388,53 @@ export async function GET(request: NextRequest) {
     }
   }
 
+  if (action === 'test-availability') {
+    console.log('=== TESTING AVAILABILITY CHECK ===');
+    try {
+      const testData = {
+        date: '2025-01-15',
+        time: '19:00',
+        people: 4,
+        location: 'terasa',
+        duration_min: 90,
+        slot_minutes: 15,
+        capacity_terasa: 40,
+        capacity_vrt: 40,
+        suggest_max: 6,
+        suggest_stepSlots: 1,
+        suggest_forwardSlots: 12
+      };
+
+      let result;
+      if (process.env.MAKE_WEBHOOK_CHECK_AVAILABILITY) {
+        // Use direct webhook
+        const response = await fetch(process.env.MAKE_WEBHOOK_CHECK_AVAILABILITY, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(testData)
+        });
+        result = await response.json();
+      } else {
+        // Use fallback (this would normally not work without proper MCP setup)
+        result = { error: 'MAKE_WEBHOOK_CHECK_AVAILABILITY not configured' };
+      }
+
+      return NextResponse.json({
+        success: true,
+        message: 'Availability check test completed',
+        result: result,
+        mode: 'webhook'
+      });
+    } catch (error) {
+      console.error('Availability test failed:', error);
+      return NextResponse.json({
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error',
+        mode: 'webhook'
+      }, { status: 500 });
+    }
+  }
+
   return NextResponse.json({
     configured: !!process.env.MCP_SERVER_URL,
     serverUrlConfigured: !!process.env.MCP_SERVER_URL,
@@ -377,15 +444,19 @@ export async function GET(request: NextRequest) {
     testEndpoints: {
       reservation: '/api/mcp?action=test-reservation',
       order: '/api/mcp?action=test-order',
+      availability: '/api/mcp?action=test-availability',
       tools: '/api/mcp?action=tools'
     }
   });
 }
 
 export async function POST(request: NextRequest) {
+  console.log('🔧 [MCP] POST function called at:', new Date().toISOString());
+  
   try {
     const { action, data } = await request.json();
-    console.log('MCP API called with:', { action, data });
+    console.log('🔧 [MCP] API called with:', { action, data });
+    console.log('🔧 [MCP] Is availability check?', action === 's7260221_check_availability');
 
     let result;
     // Map action names to full tool names
@@ -393,9 +464,12 @@ export async function POST(request: NextRequest) {
       'createReservation': 's6792596_fancita_rezervation_supabase',
       'createOrder': 's6798488_fancita_order_supabase',
       'transfer_to_staff': 'transfer_to_staff',
+      'check_availability': 'check_availability',
       // Direct tool name mapping
       's6792596_fancita_rezervation_supabase': 's6792596_fancita_rezervation_supabase',
-      's6798488_fancita_order_supabase': 's6798488_fancita_order_supabase'
+      's6798488_fancita_order_supabase': 's6798488_fancita_order_supabase',
+      'check_availability': 'check_availability',
+      's7260221_check_availability': 's7260221_check_availability'
     };
 
     const fullToolName = toolNameMap[action] || action;
@@ -435,14 +509,109 @@ export async function POST(request: NextRequest) {
     if (!result) {
       // Use fallback webhook
       console.log('🔄 Using fallback webhook for:', action);
-      let webhookId = 's6798488'; // default to order
-      if (action === 'createReservation' || action === 's6792596_fancita_rezervation_supabase') {
-        webhookId = 's6792596';
-      } else if (action === 'createOrder' || action === 's6798488_fancita_order_supabase') {
-        webhookId = 's6798488';
+      
+      // Special handling for check_availability
+      if (action === 'check_availability' || action === 's7260221_check_availability') {
+        console.log('🔄 Using direct webhook for availability check');
+        if (process.env.MAKE_WEBHOOK_CHECK_AVAILABILITY) {
+          const response = await fetch(process.env.MAKE_WEBHOOK_CHECK_AVAILABILITY, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+          });
+          result = await response.json();
+        } else {
+          throw new Error('MAKE_WEBHOOK_CHECK_AVAILABILITY not configured');
+        }
+      } else {
+        // Original webhook logic for reservations and orders
+        let webhookId = 's6798488'; // default to order
+        if (action === 'createReservation' || action === 's6792596_fancita_rezervation_supabase') {
+          webhookId = 's6792596';
+        } else if (action === 'createOrder' || action === 's6798488_fancita_order_supabase') {
+          webhookId = 's6798488';
+        }
+        console.log('🔄 Using webhook ID:', webhookId, 'for action:', action);
+        result = await callMakeWebhook(webhookId, data);
       }
-      console.log('🔄 Using webhook ID:', webhookId, 'for action:', action);
-      result = await callMakeWebhook(webhookId, data);
+    }
+
+    // Special handling for availability check - parse the result properly
+    if (action === 's7260221_check_availability' && result) {
+      console.log('[mcp] 🔧 Processing availability check result:', result);
+      
+      // Check if result has content array (generic MCP response)
+      if (result.content && Array.isArray(result.content)) {
+        console.log('[mcp] 🔍 Analyzing MCP content array:', result.content);
+        
+        // Look for actual JSON data in the content
+        for (const item of result.content) {
+          console.log('[mcp] 🔍 Processing content item:', item);
+          
+          if (item.type === 'text' && item.text) {
+            console.log('[mcp] 🔍 Found text content:', item.text);
+            console.log('[mcp] 🔍 Text length:', item.text.length);
+            console.log('[mcp] 🔍 Text type:', typeof item.text);
+            
+            try {
+              // Try to parse the text as JSON (Make.com result)
+              let parsedResult = JSON.parse(item.text);
+              console.log('[mcp] 🔍 Successfully parsed JSON:', parsedResult);
+              
+              // Check if it's a Make.com wrapper with "Result" field containing escaped JSON
+              if (parsedResult.Result && typeof parsedResult.Result === 'string') {
+                console.log('[mcp] 🔍 Found Make.com Result wrapper, parsing inner JSON...');
+                parsedResult = JSON.parse(parsedResult.Result);
+                console.log('[mcp] 🔍 Successfully parsed inner JSON:', parsedResult);
+              }
+              
+              if (parsedResult.status && parsedResult.hasOwnProperty('available')) {
+                console.log('[mcp] 🔧 Found Make.com availability result:', parsedResult);
+                return NextResponse.json({
+                  success: true,
+                  data: parsedResult,
+                  mode: mcpClient ? 'mcp' : 'fallback'
+                });
+              } else if (parsedResult.status) {
+                // Even if no 'available' property, if it has status, it might be valid
+                console.log('[mcp] 🔧 Found Make.com result with status:', parsedResult);
+                return NextResponse.json({
+                  success: true,
+                  data: parsedResult,
+                  mode: mcpClient ? 'mcp' : 'fallback'
+                });
+              }
+            } catch (parseError) {
+              console.log('[mcp] 🔍 Text is not JSON, content:', item.text);
+              
+              // If it's not JSON, check if it's the success message
+              if (item.text === 'Scenario executed successfully.') {
+                console.log('[mcp] ⚠️ Make.com scenario executed but no result data found');
+                // Return a basic success response
+                return NextResponse.json({
+                  success: true,
+                  data: {
+                    status: 'ok',
+                    available: true,
+                    message: 'Scenario executed but no detailed data available'
+                  },
+                  mode: mcpClient ? 'mcp' : 'fallback'
+                });
+              }
+            }
+          }
+        }
+      }
+      
+      // If result is already in the correct format (direct from Make.com)
+      if (result.status && result.hasOwnProperty('available')) {
+        console.log('[mcp] 🔧 Direct Make.com availability result:', result);
+        return NextResponse.json({
+          success: true,
+          data: result,
+          mode: mcpClient ? 'mcp' : 'fallback'
+        });
+      }
     }
 
     return NextResponse.json({

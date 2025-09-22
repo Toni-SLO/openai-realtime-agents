@@ -1484,6 +1484,7 @@ async function processCall(callId, event, callerFrom, callerPhone) {
             'response.output_audio_transcript.done',
             'response.output_audio.delta',
             'response.function_call_arguments.done',
+            'response.function_call_arguments.delta',
             'conversation.item.created',
             'error',
             'session.updated'
@@ -1614,10 +1615,33 @@ async function processCall(callId, event, callerFrom, callerPhone) {
                 transcriptionModel: 'gpt-4o-mini-transcribe'
               }
             });
+          } else if (message.type === 'response.function_call_arguments.delta') {
+            // Accumulate streamed function call arguments per call_id
+            try {
+              if (!global.functionArgBuffers) global.functionArgBuffers = new Map();
+              if (!global.functionArgBuffers.has(callId)) {
+                global.functionArgBuffers.set(callId, new Map());
+              }
+              const buffersForCall = global.functionArgBuffers.get(callId);
+              const prev = buffersForCall.get(message.call_id) || '';
+              const next = prev + (message.delta || '');
+              buffersForCall.set(message.call_id, next);
+            } catch (e) {
+              console.warn('[sip-webhook] ⚠️ Failed to buffer function args delta:', e);
+            }
           } else if (message.type === 'response.function_call_arguments.done') {
             // Tool call completed - track it as pending
             let parsedArgs;
             try {
+              // If we have buffered deltas for this call, prefer them
+              if (global.functionArgBuffers && global.functionArgBuffers.has(callId)) {
+                const buffersForCall = global.functionArgBuffers.get(callId);
+                const buffered = buffersForCall.get(message.call_id);
+                if (buffered && typeof buffered === 'string' && buffered.length > 0) {
+                  message.arguments = buffered;
+                  buffersForCall.delete(message.call_id);
+                }
+              }
               parsedArgs = JSON.parse(message.arguments || '{}');
             } catch (parseError) {
               console.error('[sip-webhook] ❌ JSON parse error for tool arguments:', parseError);
@@ -1983,6 +2007,122 @@ async function handleToolCall(ws, message, callerPhone, callId) {
       const switchMessage = `🌍 JEZIK PREKLOPLJEN: ${languageCode.toUpperCase()} (${languageName})\n📝 Zaznane fraze: "${detectedPhrases}"\n✅ Transkripcijski model posodobljen na ${languageCode}\n🤖 NAVODILO: Nadaljuj pogovor v jeziku ${languageName} iz konteksta prejšnjega pogovora. Ne sprašuj ponovno "Kako lahko pomagam?" ampak direktno nadaljuj z ustreznim vprašanjem glede na to, kar je gost že omenil.`;
       
       result = { success: true, data: switchMessage };
+    } else if (message.name === 's7260221_check_availability') {
+      // Availability check via MCP
+      // Parse args safely
+      let args = {};
+      try {
+        args = JSON.parse(message.arguments || '{}');
+      } catch (e) {
+        console.warn('[sip-webhook] ⚠️ Availability args parse failed, using empty object');
+        args = {};
+      }
+
+      // Load defaults from settings
+      const availability = settings.availability || {};
+      const durationThreshold = availability.duration?.threshold || 4;
+
+      // Compose request with defaults
+      const requestData = {
+        date: args.date,
+        time: args.time,
+        people: args.people || args.guests_number || 2,
+        location: args.location || 'terasa',
+        duration_min: args.duration_min || ( (args.people || args.guests_number || 2) <= durationThreshold
+          ? (availability.duration?.smallGroup || 90)
+          : (availability.duration?.largeGroup || 120)
+        ),
+        slot_minutes: args.slot_minutes || availability.slotMinutes || 15,
+        capacity_terasa: args.capacity_terasa || availability.capacity_terasa || 40,
+        capacity_vrt: args.capacity_vrt || availability.capacity_vrt || 40,
+        suggest_max: args.suggest_max || availability.suggest_max || 6,
+        suggest_stepSlots: args.suggest_stepSlots || availability.suggest_stepSlots || 1,
+        suggest_forwardSlots: args.suggest_forwardSlots || availability.suggest_forwardSlots || 12
+      };
+
+      // Log tool_call to transcript with full request
+      logTranscriptEvent(callId, {
+        type: 'tool_call',
+        tool_name: 's7260221_check_availability',
+        tool_description: 'Preverjanje zasedenosti (MCP)',
+        arguments: requestData,
+        call_id: message.call_id,
+        timestamp: new Date().toISOString(),
+        metadata: {
+          toolName: 's7260221_check_availability',
+          callId: message.call_id,
+          requestData
+        }
+      });
+
+      // Call Next.js MCP endpoint which already handles Make.com parsing quirks
+      const nextjsApiUrl = process.env.NEXTJS_API_URL || 'http://localhost:3000';
+      const mcpApiUrl = `${nextjsApiUrl}/api/mcp`;
+
+      try {
+        const response = await fetch(mcpApiUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 's7260221_check_availability', data: requestData })
+        });
+
+        if (!response.ok) {
+          const text = await response.text().catch(() => '');
+          throw new Error(`MCP API error: ${response.status} ${response.statusText} ${text}`);
+        }
+
+        const mcpResponse = await response.json();
+        // Normalize output
+        if (mcpResponse && mcpResponse.success && mcpResponse.data) {
+          result = mcpResponse.data;
+        } else {
+          result = mcpResponse;
+        }
+
+        // Build summary for transcript
+        let resultSummary = '';
+        try {
+          const r = result || {};
+          const suggestionsCount = Array.isArray(r.suggestions) ? r.suggestions.length : 0;
+          const altsCount = Array.isArray(r.alts) ? r.alts.length : 0;
+          if (r.status) {
+            resultSummary = `status=${r.status}, available=${r.available}, load_pct=${r.load_pct ?? 'n/a'}, suggestions=${suggestionsCount}, alts=${altsCount}`;
+          }
+        } catch {}
+
+        // Log tool_result to transcript with full response
+        logTranscriptEvent(callId, {
+          type: 'tool_result',
+          tool_call_id: message.call_id,
+          result: result,
+          result_summary: resultSummary || 'availability result',
+          timestamp: new Date().toISOString(),
+          metadata: {
+            mode: 'mcp',
+            endpoint: mcpApiUrl,
+            requestData,
+            rawResponse: result
+          }
+        });
+      } catch (error) {
+        console.error('[sip-webhook] ❌ Availability MCP error:', error);
+        result = { success: false, error: `Availability check failed: ${error.message}` };
+
+        // Log error to transcript as tool_result
+        logTranscriptEvent(callId, {
+          type: 'tool_result',
+          tool_call_id: message.call_id,
+          result: result,
+          result_summary: `error: ${error.message}`,
+          timestamp: new Date().toISOString(),
+          metadata: {
+            mode: 'mcp',
+            endpoint: mcpApiUrl,
+            requestData
+          }
+        });
+      }
+
     } else if (message.name === 's6792596_fancita_rezervation_supabase' || message.name === 's6798488_fancita_order_supabase') {
       // CRITICAL: Validate MCP parameters before calling
       const args = JSON.parse(message.arguments);

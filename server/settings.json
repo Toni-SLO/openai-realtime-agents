@@ -67,6 +67,21 @@
     "specialRequests": "Za posebne zahteve vas povezujem z osebjem",
     "generalStaff": "Povezujem vas z osebjem"
   },
+  "availability": {
+    "slotMinutes": 15,
+    "capacity_terasa": 40,
+    "capacity_vrt": 40,
+    "suggest_max": 6,
+    "suggest_stepSlots": 1,
+    "suggest_forwardSlots": 12,
+    "duration": {
+      "default": 90,
+      "smallGroup": 90,
+      "largeGroup": 120,
+      "threshold": 4
+    },
+    "tightThreshold": 80
+  },
   "debug": {
     "logValidation": true,
     "logBusinessRules": true,

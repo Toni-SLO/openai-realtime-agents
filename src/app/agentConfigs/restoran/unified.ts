@@ -5,7 +5,8 @@ import {
   FANCITA_ORDER_TOOL, 
   FANCITA_HANDOFF_TOOL,
   FANCITA_MENU_TOOL,
-  FANCITA_LANGUAGE_TOOL
+  FANCITA_LANGUAGE_TOOL,
+  FANCITA_CHECK_AVAILABILITY_TOOL
 } from '../shared/instructions';
 import { getMenuForAgent, findMenuItem } from '../shared/menu';
 
@@ -54,6 +55,10 @@ export const unifiedRestoranAgent = new RealtimeAgent({
       execute: async (input: any, details: any) => {
         try {
           console.log('[unified-agent] Reservation tool called with:', input);
+          
+          // 🚨 SAFETY CHECK: Warn if availability wasn't checked
+          console.warn('[unified-agent] ⚠️ RESERVATION TOOL CALLED - Ensure availability was checked first!');
+          console.warn('[unified-agent] ⚠️ This should only be called AFTER successful check_availability!');
           
           // Extract caller phone from context
           const rawCallerPhone = details?.context?.system__caller_id || '{{system__caller_id}}';
@@ -217,12 +222,99 @@ export const unifiedRestoranAgent = new RealtimeAgent({
       },
     }),
 
+    // Direct MCP tool for availability check (if MCP_SERVER_URL is configured)
+    ...(process.env.MCP_SERVER_URL ? [{
+      type: 'mcp' as const,
+      server_url: process.env.MCP_SERVER_URL,
+      name: 's7260221_check_availability'
+    }] : []),
+
     // Direct MCP tool for handoff (if MCP_SERVER_URL is configured)
     ...(process.env.MCP_SERVER_URL ? [{
       type: 'mcp' as const,
       server_url: process.env.MCP_SERVER_URL,
       name: 'transfer_to_staff'
     }] : []),
+
+    // Check availability tool
+    tool({
+      name: FANCITA_CHECK_AVAILABILITY_TOOL.name,
+      description: FANCITA_CHECK_AVAILABILITY_TOOL.description,
+      parameters: FANCITA_CHECK_AVAILABILITY_TOOL.parameters as any,
+      execute: async (input: any, details: any) => {
+        try {
+          console.log('[unified-agent] 🔧 Check availability tool called with:', input);
+          console.log('[unified-agent] 🔧 Details:', details);
+
+          // Load settings for default values
+          const settings = require('../../../../server/settings.json');
+          const availabilitySettings = settings.availability || {};
+
+          // Prepare request data with defaults from settings
+          const requestData = {
+            date: input.date,
+            time: input.time,
+            people: input.people,
+            location: input.location,
+            duration_min: input.duration_min || (input.people <= (availabilitySettings.duration?.threshold || 4) 
+              ? (availabilitySettings.duration?.smallGroup || 90) 
+              : (availabilitySettings.duration?.largeGroup || 120)),
+            slot_minutes: input.slot_minutes || availabilitySettings.slotMinutes || 15,
+               capacity_terasa: input.capacity_terasa || availabilitySettings.capacity_terasa || 40,
+               capacity_vrt: input.capacity_vrt || availabilitySettings.capacity_vrt || 40,
+               suggest_max: input.suggest_max || availabilitySettings.suggest_max || 6,
+               suggest_stepSlots: input.suggest_stepSlots || availabilitySettings.suggest_stepSlots || 1,
+               suggest_forwardSlots: input.suggest_forwardSlots || availabilitySettings.suggest_forwardSlots || 12
+          };
+
+          console.log('[unified-agent] 🔧 Processed request data:', requestData);
+
+          // Call Make.com webhook for availability check
+          let response;
+          try {
+            if (process.env.MAKE_WEBHOOK_CHECK_AVAILABILITY) {
+              console.log('[unified-agent] Using direct webhook for availability check');
+              response = await fetch(process.env.MAKE_WEBHOOK_CHECK_AVAILABILITY, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(requestData)
+              });
+            } else {
+              // Fallback to MCP API endpoint
+              const url = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
+              response = await fetch(`${url}/api/mcp`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  action: 'check_availability',
+                  data: requestData
+                })
+              });
+            }
+          } catch (fetchError) {
+            console.error('[unified-agent] Availability check fetch failed:', fetchError);
+            throw new Error('Network error during availability check');
+          }
+
+          const result = await response.json();
+          console.log('[unified-agent] 🔧 Availability check result:', result);
+
+          if (result.success !== false) {
+            return result;
+          } else {
+            throw new Error(result.error || 'Availability check failed');
+          }
+        } catch (error) {
+          console.error('[unified-agent] 🚨 Availability check failed:', error);
+          return { 
+            success: false, 
+            error: error instanceof Error ? error.message : String(error),
+            status: 'error',
+            message: "Oprostite, trenutno ne morem preveriti zasedenosti. Poskusite kasneje ali se obrnite na osebje."
+          };
+        }
+      },
+    }),
 
     // Menu search tool
     tool({

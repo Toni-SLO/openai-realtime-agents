@@ -2,7 +2,9 @@
 // NOTE: Za začetek ne izvajamo verifikacije podpisa; fokus je na delujočem sprejemu klica.
 
 // Import shared instructions
-import { FANCITA_UNIFIED_INSTRUCTIONS, replaceInstructionVariables } from '../../../agentConfigs/shared/instructions';
+import { FANCITA_UNIFIED_INSTRUCTIONS } from '../../../agentConfigs/shared/instructions';
+import { replaceInstructionVariables } from '../../../agentConfigs/shared/instructionVariables';
+import { NextResponse } from 'next/server';
 
 // Deduplicate accepts per call_id within this process
 const acceptedCallIds = new Set<string>();
@@ -34,7 +36,7 @@ function updateTranscriptionLanguage(ws: any, callId: string, newLanguage: strin
 }
 
 // Transcript bridge connection for realtime sharing
-import WebSocket from 'isomorphic-ws';
+import WebSocket from 'ws';
 
 let transcriptBridgeWs: WebSocket | null = null;
 
@@ -56,7 +58,7 @@ function connectTranscriptBridge() {
       setTimeout(connectTranscriptBridge, 3000);
     });
     
-    transcriptBridgeWs.on('error', (error) => {
+    transcriptBridgeWs.on('error', (error: any) => {
       console.error('[openai-webhook] Transcript bridge error:', error);
     });
     
@@ -80,7 +82,7 @@ function sendTranscriptEvent(sessionId: string, event: any) {
     const logEntry = `[${new Date().toISOString()}] ${JSON.stringify(event)}\n`;
     
     fs.appendFileSync(logFile, logEntry);
-  } catch (error) {
+  } catch (error: any) {
     console.warn('[transcript] Error logging event:', error.message);
   }
   
@@ -92,7 +94,7 @@ function sendTranscriptEvent(sessionId: string, event: any) {
         sessionId,
         event
       }));
-  } catch (error) {
+  } catch (error: any) {
       console.warn('[transcript] Error sending to bridge:', error.message);
     }
   }
@@ -107,7 +109,7 @@ function endTranscriptSession(sessionId: string) {
       closeCode: 1000,
       closeReason: 'Normal closure'
     });
-  } catch (error) {
+  } catch (error: any) {
     console.warn('[transcript] Error ending session:', error.message);
   }
 }
@@ -128,6 +130,146 @@ function returnDirectAudioResponse(voice = process.env.OPENAI_REALTIME_VOICE || 
 }
 
 // Tool handler functions
+async function handleCheckAvailabilityTool(ws: any, functionCallId: string, args: string, callerPhone: string, callId: string) {
+  console.log('[openai-webhook] 🚨🚨🚨 ENTERED handleCheckAvailabilityTool FUNCTION 🚨🚨🚨');
+  try {
+    console.log('[openai-webhook] 🚀 STARTING handleCheckAvailabilityTool');
+    console.log('[openai-webhook] 🚀 Function called with:', { functionCallId, args, callerPhone, callId });
+    console.log('[openai-webhook] 🚀 WebSocket state:', ws.readyState);
+    console.log('[openai-webhook] Executing availability check tool with args:', args);
+    const params = JSON.parse(args);
+    
+    // Load settings for default values
+    const settings = require('../../../../server/settings.json');
+    const availabilitySettings = settings.availability || {};
+    
+    // Prepare request data with defaults from settings
+    const requestData = {
+      date: params.date,
+      time: params.time,
+      people: params.people,
+      location: params.location,
+      duration_min: params.duration_min || (params.people <= (availabilitySettings.duration?.threshold || 4) 
+        ? (availabilitySettings.duration?.smallGroup || 90) 
+        : (availabilitySettings.duration?.largeGroup || 120)),
+         slot_minutes: params.slot_minutes || availabilitySettings.slotMinutes || 15,
+         capacity_terasa: params.capacity_terasa || availabilitySettings.capacity_terasa || 40,
+         capacity_vrt: params.capacity_vrt || availabilitySettings.capacity_vrt || 40,
+         suggest_max: params.suggest_max || availabilitySettings.suggest_max || 6,
+         suggest_stepSlots: params.suggest_stepSlots || availabilitySettings.suggest_stepSlots || 1,
+         suggest_forwardSlots: params.suggest_forwardSlots || availabilitySettings.suggest_forwardSlots || 12
+    };
+    
+    // Call MCP endpoint (same pattern as reservation tool)
+    console.log('[openai-webhook] 🔧 Calling MCP endpoint for availability check');
+    console.log('[openai-webhook] 🔧 Request data:', JSON.stringify(requestData, null, 2));
+    
+    const mcpResponse = await fetch('http://localhost:3000/api/mcp', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 's7260221_check_availability',
+        data: requestData
+      })
+    });
+    
+    console.log('[openai-webhook] 🔧 MCP response received, status:', mcpResponse.status);
+
+    if (!mcpResponse.ok) {
+      console.error('[openai-webhook] 🚨 MCP response not OK:', mcpResponse.status, mcpResponse.statusText);
+      const errorText = await mcpResponse.text();
+      console.error('[openai-webhook] 🚨 MCP error response:', errorText);
+      throw new Error(`MCP API error: ${mcpResponse.status} ${mcpResponse.statusText}`);
+    }
+
+    const result = await mcpResponse.json();
+    console.log('[openai-webhook] 🔧 MCP result:', result);
+
+    // Send function result back to OpenAI (same pattern as reservation tool)
+    let outputData = result.success ? result.data : result;
+    
+    console.log('[openai-webhook] 🔧 Final outputData for OpenAI:', outputData);
+    console.log('[openai-webhook] 🔧 About to send function_call_output with callId:', functionCallId);
+
+    console.log('[openai-webhook] 🚀 SENDING RESULT TO OPENAI:', {
+      functionCallId,
+      outputData,
+      outputDataString: JSON.stringify(outputData)
+    });
+
+    const outputMessage = {
+      type: 'conversation.item.create',
+      item: {
+        type: 'function_call_output',
+        call_id: functionCallId,
+        output: JSON.stringify(outputData)
+      }
+    };
+    
+    console.log('[openai-webhook] 🚀 FULL OUTPUT MESSAGE:', JSON.stringify(outputMessage, null, 2));
+    
+    ws.send(JSON.stringify(outputMessage));
+
+    console.log('[openai-webhook] 🚀 RESULT SENT, generating response...');
+
+    // Always generate response after function call
+    const responseMessage = { type: 'response.create' };
+    console.log('[openai-webhook] 🚀 SENDING RESPONSE CREATE:', JSON.stringify(responseMessage));
+    
+    ws.send(JSON.stringify(responseMessage));
+
+    console.log('[openai-webhook] 🚀 RESPONSE GENERATION TRIGGERED');
+    
+    // Log the tool call
+    sendTranscriptEvent(callId, {
+      type: 'tool_call',
+      tool_name: 'check_availability',
+      arguments: args,
+      call_id: functionCallId,
+      result: result,
+      timestamp: new Date().toISOString(),
+      metadata: { 
+        toolName: 'check_availability',
+        callId: functionCallId,
+        argumentCount: Object.keys(params).length,
+        argumentKeys: Object.keys(params),
+        success: result.success !== false
+      }
+    });
+
+  } catch (error: any) {
+    console.error('[openai-webhook] 🚨 AVAILABILITY CHECK TOOL ERROR:', error);
+    console.error('[openai-webhook] 🚨 Error details:', {
+      message: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+      functionCallId,
+      args
+    });
+    
+    const errorOutput = { 
+      success: false, 
+      error: error instanceof Error ? error.message : String(error),
+      status: 'error',
+      message: 'Oprostite, trenutno ne morem preveriti zasedenosti. Poskusite kasneje.'
+    };
+    
+    console.log('[openai-webhook] 🚨 Sending error output:', errorOutput);
+    
+    ws.send(JSON.stringify({
+      type: 'conversation.item.create',
+      item: {
+        type: 'function_call_output',
+        call_id: functionCallId,
+        output: JSON.stringify(errorOutput)
+      }
+    }));
+    
+    ws.send(JSON.stringify({
+      type: 'response.create'
+    }));
+  }
+}
+
 async function handleReservationTool(ws: any, functionCallId: string, args: string, callerPhone: string, callId: string) {
   try {
     console.log('[openai-webhook] Executing reservation tool with args:', args);
@@ -519,7 +661,7 @@ export async function POST(req: Request): Promise<Response> {
           callerPhone = callerFrom.includes('+') ? callerFrom : '+' + callerFrom.match(/\d+/)?.[0] || callerFrom;
         }
       }
-      const acceptInstructions = replaceInstructionVariables(FANCITA_UNIFIED_INSTRUCTIONS, callerFrom, callId);
+      const acceptInstructions = await replaceInstructionVariables(FANCITA_UNIFIED_INSTRUCTIONS);
 
       const acceptPayload = {
         type: 'realtime',
@@ -622,7 +764,41 @@ export async function POST(req: Request): Promise<Response> {
               ws.send(JSON.stringify({
                 type: 'session.update',
                 session: {
-                  tools: [
+        tools: [
+          {
+            type: 'function',
+            name: 's7260221_check_availability',
+            description: 'MOCK: Always returns available status for testing',
+            parameters: {
+              type: 'object',
+              properties: {
+                date: { type: 'string', description: 'Reservation date (YYYY-MM-DD)' },
+                time: { type: 'string', description: 'Reservation time (HH:MM)' },
+                people: { type: 'number', description: 'Number of guests' },
+                location: { type: 'string', description: 'Table location: terasa or vrt' }
+              },
+              required: ['date', 'time', 'people', 'location']
+            }
+          },
+                    {
+                      type: 'function',
+                      name: 'check_availability',
+                      description: 'Check table availability for a specific date, time, and location before making a reservation',
+                      parameters: {
+                        type: 'object',
+                        properties: {
+                          date: { type: 'string', description: 'Reservation date (YYYY-MM-DD)' },
+                          time: { type: 'string', description: 'Reservation time (HH:MM)' },
+                          people: { type: 'number', description: 'Number of guests' },
+                          location: { type: 'string', description: 'Table location: terasa or vrt' },
+                          duration_min: { type: 'number', description: 'Reservation duration in minutes' },
+                          slot_minutes: { type: 'number', description: 'Time slot granularity' },
+                          capacity: { type: 'object', description: 'Capacity per location' },
+                          suggest: { type: 'object', description: 'Suggestion parameters' }
+                        },
+                        required: ['date', 'time', 'people', 'location']
+                      }
+                    },
                     {
                       type: 'function',
                       name: 's6792596_fancita_rezervation_supabase',
@@ -710,6 +886,25 @@ export async function POST(req: Request): Promise<Response> {
               
               console.log('[openai-webhook] ws event', ev?.type || 'unknown');
               
+              // CRITICAL DEBUG - LOG ALL FUNCTION CALL EVENTS
+              if (ev?.type && ev.type.includes('function_call')) {
+                console.log('[openai-webhook] 🚨🚨🚨 FUNCTION CALL EVENT DETECTED 🚨🚨🚨');
+                console.log('[openai-webhook] 🚨 Event type:', ev.type);
+                console.log('[openai-webhook] 🚨 Full event:', JSON.stringify(ev, null, 2));
+              }
+              
+              // DIRECT HANDLER FOR s7260221_check_availability
+              if (ev?.type === 'response.function_call_arguments.done' && ev?.name === 's7260221_check_availability') {
+                console.log('[openai-webhook] 🚨🚨🚨 DIRECT AVAILABILITY CHECK HANDLER 🚨🚨🚨');
+                console.log('[openai-webhook] 🚨 Function call ID:', ev?.call_id);
+                console.log('[openai-webhook] 🚨 Args:', ev?.arguments);
+                
+                // DIRECT MCP CALL TO MAKE.COM
+                handleCheckAvailabilityTool(ws, ev?.call_id, ev?.arguments, callerPhone, callId);
+                console.log('[openai-webhook] 🚨 DIRECT MCP CALL INITIATED');
+                return; // Exit early
+              }
+              
               // Log session updates
               if (ev?.type === 'session.update') {
                 sendTranscriptEvent(callId, {
@@ -753,9 +948,20 @@ export async function POST(req: Request): Promise<Response> {
                 const functionCallId = ev?.call_id;
                 const args = ev?.arguments;
                 
+                console.log('[openai-webhook] 🚨🚨🚨 FUNCTION CALL EVENT RECEIVED 🚨🚨🚨');
+                console.log('[openai-webhook] 🚨 Event type:', ev?.type);
+                console.log('[openai-webhook] 🚨 Tool name:', toolName);
+                console.log('[openai-webhook] 🚨 Function call ID:', functionCallId);
+                console.log('[openai-webhook] 🚨 Args:', args);
                 console.log('[openai-webhook] Function call:', toolName, 'with args:', args);
                 
-                if (toolName === 's6792596_fancita_rezervation_supabase') {
+                if (toolName === 'check_availability' || toolName === 's7260221_check_availability') {
+                  console.log('[openai-webhook] 🚨 ABOUT TO CALL handleCheckAvailabilityTool');
+                  console.log('[openai-webhook] 🚨 Tool name:', toolName);
+                  console.log('[openai-webhook] 🚨 Function call ID:', functionCallId);
+                  console.log('[openai-webhook] 🚨 Args:', args);
+                  handleCheckAvailabilityTool(ws, functionCallId, args, callerPhone, callId);
+                } else if (toolName === 's6792596_fancita_rezervation_supabase') {
                   handleReservationTool(ws, functionCallId, args, callerPhone, callId);
                 } else if (toolName === 's6798488_fancita_order_supabase') {
                   handleOrderTool(ws, functionCallId, args, callerPhone, callId);
