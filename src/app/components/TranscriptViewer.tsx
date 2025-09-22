@@ -32,6 +32,9 @@ export function TranscriptViewer() {
   const [isVisible, setIsVisible] = useState(false);
   const [autoScroll, setAutoScroll] = useState(true);
   const [deleteConfirm, setDeleteConfirm] = useState<string>('');
+  const [playingRecording, setPlayingRecording] = useState<string>('');
+  const [recordingUrl, setRecordingUrl] = useState<string>('');
+  const [showAudioPlayer, setShowAudioPlayer] = useState<string>(''); // sessionId of currently shown player
   const transcriptEndRef = useRef<HTMLDivElement>(null);
 
   // Helper function to extract phone number from caller info
@@ -55,6 +58,41 @@ export function TranscriptViewer() {
       'nl': 'NL'
     };
     return languages[langCode] || langCode?.toUpperCase() || 'HR';
+  };
+
+  const playRecording = async (sessionId: string) => {
+    try {
+      setPlayingRecording(sessionId);
+
+      // Get recordings for this call from Twilio REST API
+      const response = await fetch(`/api/recordings?callSid=${sessionId}`);
+
+      if (!response.ok) {
+        throw new Error(`API error: ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      if (data.success && data.recordings && data.recordings.length > 0) {
+        const recording = data.recordings[0]; // Get first recording for this call
+        
+        // Show inline audio player instead of opening external URL
+        setRecordingUrl(recording.downloadUrl);
+        setShowAudioPlayer(sessionId);
+      } else {
+        alert('Posnetek ni na voljo za ta klic.');
+      }
+    } catch (error) {
+      console.error('Failed to play recording:', error);
+      alert('Napaka pri pridobivanju posnetka.');
+    } finally {
+      setPlayingRecording('');
+    }
+  };
+
+  const closeAudioPlayer = () => {
+    setShowAudioPlayer('');
+    setRecordingUrl('');
   };
 
   const deleteTranscript = async (sessionId: string) => {
@@ -397,15 +435,28 @@ export function TranscriptViewer() {
                               </span>
                             )}
                           </div>
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setDeleteConfirm(transcript.sessionId);
-                            }}
-                            className="ml-2 px-1 py-0.5 bg-red-500 text-white rounded text-xs hover:bg-red-600"
-                          >
-                            🗑️
-                          </button>
+                          <div className="flex gap-1">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                playRecording(transcript.sessionId);
+                              }}
+                              disabled={playingRecording === transcript.sessionId}
+                              className="px-1 py-0.5 bg-green-500 text-white rounded text-xs hover:bg-green-600 disabled:bg-gray-400"
+                              title="Predvajaj posnetek klica"
+                            >
+                              {playingRecording === transcript.sessionId ? '⏳' : '🎵'}
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setDeleteConfirm(transcript.sessionId);
+                              }}
+                              className="px-1 py-0.5 bg-red-500 text-white rounded text-xs hover:bg-red-600"
+                            >
+                              🗑️
+                            </button>
+                          </div>
                         </div>
                         
                         {/* Delete confirmation for this transcript */}
@@ -454,6 +505,58 @@ export function TranscriptViewer() {
                         <div className="text-xs text-gray-400 mt-1">
                           {Math.round(transcript.size / 1024)} KB
                         </div>
+                        
+                        {/* Inline Audio Player */}
+                        {showAudioPlayer === transcript.sessionId && recordingUrl && (
+                          <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded">
+                            <div className="flex items-center justify-between mb-2">
+                              <span className="text-sm font-medium text-blue-800">🎵 Posnetek klica</span>
+                              <div className="flex gap-2">
+                                <button
+                                  onClick={async () => {
+                                    // Get recording details for external link
+                                    try {
+                                      const response = await fetch(`/api/recordings?callSid=${transcript.sessionId}`);
+                                      const data = await response.json();
+                                      if (data.success && data.recordings && data.recordings.length > 0) {
+                                        window.open(data.recordings[0].recordingDetailsUrl, '_blank');
+                                      }
+                                    } catch (error) {
+                                      console.error('Failed to open external link:', error);
+                                    }
+                                  }}
+                                  className="text-blue-600 hover:text-blue-800 text-sm"
+                                  title="Odpri v Twilio Console"
+                                >
+                                  🔗
+                                </button>
+                                <button
+                                  onClick={closeAudioPlayer}
+                                  className="text-blue-600 hover:text-blue-800 text-lg"
+                                  title="Zapri predvajalnik"
+                                >
+                                  ✕
+                                </button>
+                              </div>
+                            </div>
+                            <audio
+                              controls
+                              className="w-full"
+                              preload="metadata"
+                              onError={(e) => {
+                                console.error('Audio playback error:', e);
+                                alert('Napaka pri predvajanju posnetka. Poskusite znova.');
+                              }}
+                            >
+                              <source src={recordingUrl} type="audio/mpeg" />
+                              <source src={recordingUrl} type="audio/wav" />
+                              Vaš brskalnik ne podpira predvajanja zvoka.
+                            </audio>
+                            <div className="mt-2 text-xs text-blue-600">
+                              💡 Tip: Če se posnetek ne predvaja, preverite Twilio kredenciale
+                            </div>
+                          </div>
+                        )}
                       </div>
                     );
                   })}

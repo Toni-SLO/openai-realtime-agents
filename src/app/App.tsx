@@ -9,6 +9,7 @@ import Image from "next/image";
 import Transcript from "./components/Transcript";
 import Events from "./components/Events";
 import BottomToolbar from "./components/BottomToolbar";
+import { TranscriptViewer } from './components/TranscriptViewer';
 
 // Types
 import { SessionStatus } from "@/app/types";
@@ -19,7 +20,6 @@ import { useTranscript } from "@/app/contexts/TranscriptContext";
 import { useEvent } from "@/app/contexts/EventContext";
 import { useRealtimeSession } from "./hooks/useRealtimeSession";
 import { useTranscriptBridge } from "./hooks/useTranscriptBridge";
-import { TranscriptViewer } from "./components/TranscriptViewer";
 import { createModerationGuardrail } from "@/app/agentConfigs/guardrails";
 
 // Agent configs
