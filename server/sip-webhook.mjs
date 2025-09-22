@@ -64,7 +64,7 @@ if (URGENT_ERROR_EMAIL) {
 async function sendUrgentErrorEmail(errorType, errorDetails, callId, suggestions = []) {
   if (!emailTransporter || !URGENT_ERROR_EMAIL) return;
   
-  const timestamp = new Date().toLocaleString('sl-SI');
+  const timestamp = new Date().toLocaleString('sl-SI', { timeZone: 'Europe/Ljubljana' });
   const subject = `🚨 FANČITA URGENTNO: ${errorType} - ${timestamp}`;
   
   const htmlContent = `
@@ -1410,11 +1410,11 @@ async function processCall(callId, event, callerFrom, callerPhone) {
         logTranscriptEvent(callId, {
           type: 'session_start',
           sessionId: callId,
-          content: `📞 Klic iz: ${callerPhone} | 📅 ${startTime.toLocaleDateString('sl-SI')} ${startTime.toLocaleTimeString('sl-SI')} | 🌍 Jezik: ${initialLanguage}`,
+          content: `📞 Klic iz: ${callerPhone} | 📅 ${startTime.toLocaleDateString('sl-SI', { timeZone: 'Europe/Ljubljana' })} ${startTime.toLocaleTimeString('sl-SI', { timeZone: 'Europe/Ljubljana' })} | 🌍 Jezik: ${initialLanguage}`,
           metadata: { 
             callerPhone,
             startTime: startTime.toISOString(),
-            startTimeFormatted: `${startTime.toLocaleDateString('sl-SI')} ${startTime.toLocaleTimeString('sl-SI')}`,
+            startTimeFormatted: `${startTime.toLocaleDateString('sl-SI', { timeZone: 'Europe/Ljubljana' })} ${startTime.toLocaleTimeString('sl-SI', { timeZone: 'Europe/Ljubljana' })}`,
             model: MODEL,
             voice: VOICE,
             codec: SIP_CODEC,

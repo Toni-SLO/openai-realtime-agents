@@ -560,11 +560,11 @@ export async function POST(req: Request): Promise<Response> {
           sendTranscriptEvent(callId, {
             type: 'session_start',
             sessionId: callId,
-            content: `📞 Klic iz: ${callerPhone} | 📅 ${startTime.toLocaleDateString('sl-SI')} ${startTime.toLocaleTimeString('sl-SI')}`,
+            content: `📞 Klic iz: ${callerPhone} | 📅 ${startTime.toLocaleDateString('sl-SI', { timeZone: 'Europe/Ljubljana' })} ${startTime.toLocaleTimeString('sl-SI', { timeZone: 'Europe/Ljubljana' })}`,
             metadata: { 
               callerPhone,
               startTime: startTime.toISOString(),
-              startTimeFormatted: `${startTime.toLocaleDateString('sl-SI')} ${startTime.toLocaleTimeString('sl-SI')}`,
+              startTimeFormatted: `${startTime.toLocaleDateString('sl-SI', { timeZone: 'Europe/Ljubljana' })} ${startTime.toLocaleTimeString('sl-SI', { timeZone: 'Europe/Ljubljana' })}`,
               model: MODEL,
               voice: VOICE,
               codec: SIP_CODEC
