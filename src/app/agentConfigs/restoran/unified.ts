@@ -36,7 +36,7 @@ import { replaceInstructionVariablesSync } from '../shared/instructionVariables'
 // Unified agent with all restaurant capabilities
 export const unifiedRestoranAgent = new RealtimeAgent({
   name: 'fancita_restoran',
-  voice: 'marin',
+  voice: process.env.OPENAI_REALTIME_VOICE || 'marin',
   instructions: replaceInstructionVariablesSync(FANCITA_UNIFIED_INSTRUCTIONS),
   tools: [
     // Direct MCP tool for reservations (if MCP_SERVER_URL is configured)

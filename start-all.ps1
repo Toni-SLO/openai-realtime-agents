@@ -4,15 +4,44 @@ Write-Host "  FANCITA REALTIME AGENTS - STARTUP SCRIPT" -ForegroundColor Cyan
 Write-Host "================================================" -ForegroundColor Cyan
 Write-Host ""
 
-# Kill all existing Node.js processes
-Write-Host "[1/5] Ustavitev obstoječih procesov..." -ForegroundColor Yellow
-try {
-    Get-Process -Name "node" -ErrorAction Stop | Stop-Process -Force
-    Write-Host "--> Node.js procesi ustavljeni" -ForegroundColor Green
-} catch {
-    Write-Host "--> Ni bilo aktivnih Node.js procesov" -ForegroundColor Gray
+# Preveritev in ustavitev obstoječih procesov
+Write-Host "[1/5] Preveritev in ustavitev obstoječih procesov..." -ForegroundColor Yellow
+
+# Preveri, ali obstajajo Node.js procesi
+$existingNodes = Get-Process -Name "node" -ErrorAction SilentlyContinue
+if ($existingNodes) {
+    Write-Host "OPOZORILO: Najdenih $($existingNodes.Count) obstoječih Node.js procesov!" -ForegroundColor Red
+    Write-Host "Priporočam, da najprej zaženete .\stop-all.ps1 za čisto ustavitev." -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "Vseeno nadaljujem z ustavitvijo..." -ForegroundColor Yellow
+    
+    # Uporabi isto logiko kot v stop-all.ps1
+    foreach ($process in $existingNodes) {
+        Write-Host "    Ustavljam proces PID: $($process.Id)" -ForegroundColor Yellow
+        Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+    }
+    
+    # Prisilna ustavitev preko taskkill
+    try {
+        & taskkill /F /IM node.exe 2>&1 | Out-Null
+    } catch {
+        # Ignore errors
+    }
+    
+    Start-Sleep -Seconds 3
+    
+    # Končna preveritev
+    $remainingNodes = Get-Process -Name "node" -ErrorAction SilentlyContinue
+    if ($remainingNodes) {
+        Write-Host "NAPAKA: Še vedno obstaja $($remainingNodes.Count) Node.js procesov!" -ForegroundColor Red
+        Write-Host "Zaženite .\stop-all.ps1 in poskusite ponovno." -ForegroundColor Red
+        exit 1
+    } else {
+        Write-Host "--> Vsi obstoječi procesi uspešno ustavljeni" -ForegroundColor Green
+    }
+} else {
+    Write-Host "--> Ni obstoječih Node.js procesov" -ForegroundColor Green
 }
-Start-Sleep -Seconds 2
 
 # Check if ports are free
 Write-Host "[2/5] Preverjam porte..." -ForegroundColor Yellow

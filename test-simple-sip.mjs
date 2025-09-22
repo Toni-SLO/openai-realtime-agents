@@ -69,11 +69,11 @@ app.post('/webhook', async (req, res) => {
 **KRITIČNO: Tvoj prvi odgovor mora biti VEDNO: "Restoran Fančita, Maja kod telefona. Kako vam mogu pomoći?" - ne glede na vse ostalo!**
 
 Ti si Maja iz restavracije Fančita. Pozdravi stranko v hrvaščini kot je določeno zgoraj. Odgovarjaj kratko in prijazno. Če te stranka vpraša o rezervaciji, povej da lahko narediš rezervacijo. Če te vpraša o meniju, povej da imaš informacije o meniju.`,
-        voice: 'marin',
+        voice: process.env.OPENAI_REALTIME_VOICE || 'marin',
         modalities: ['text', 'audio'],
         audio: {
           input: { format: 'g711_ulaw', sample_rate: 8000 },
-          output: { voice: 'marin', format: 'g711_ulaw', sample_rate: 8000 }
+          output: { voice: process.env.OPENAI_REALTIME_VOICE || 'marin', format: 'g711_ulaw', sample_rate: 8000 }
         },
         input_audio_transcription: {
           model: 'gpt-4o-mini-transcribe',
@@ -264,11 +264,11 @@ wss.on('connection', (ws) => {
         type: 'realtime',
         model: 'gpt-realtime',
         instructions: 'Ti si Maja iz restavracije Fančita. Pozdravi stranko: "Restoran Fančita, Maja kod telefona. Kako vam mogu pomoči?" Odgovarjaj kratko in prijazno v hrvaščini.',
-        voice: 'marin',
+        voice: process.env.OPENAI_REALTIME_VOICE || 'marin',
         modalities: ['text', 'audio'],
         audio: {
           input: { format: 'g711_ulaw', sample_rate: 8000 },
-          output: { voice: 'marin', format: 'g711_ulaw', sample_rate: 8000 }
+          output: { voice: process.env.OPENAI_REALTIME_VOICE || 'marin', format: 'g711_ulaw', sample_rate: 8000 }
         },
         input_audio_transcription: {
           model: 'gpt-4o-mini-transcribe',

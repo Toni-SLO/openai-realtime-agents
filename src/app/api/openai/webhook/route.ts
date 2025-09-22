@@ -116,7 +116,7 @@ function endTranscriptSession(sessionId: string) {
 // connectTranscriptBridge();
 
 // Emergency fallback - return proper TwiML for direct audio
-function returnDirectAudioResponse(voice = 'marin') {
+function returnDirectAudioResponse(voice = process.env.OPENAI_REALTIME_VOICE || 'marin') {
   return new NextResponse(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Say voice="${voice}" language="hr-HR">Restoran Fančita, Maja kod telefona. Kako vam mogu pomoći?</Say>
@@ -133,11 +133,8 @@ async function handleReservationTool(ws: any, functionCallId: string, args: stri
     console.log('[openai-webhook] Executing reservation tool with args:', args);
     const params = JSON.parse(args);
     
-    // Extract clean phone number from caller header and ensure it has +
-    let cleanPhone = callerPhone.match(/(\+?\d{8,15})/)?.[1] || callerPhone;
-    if (cleanPhone && !cleanPhone.startsWith('+') && cleanPhone.match(/^\d{8,15}$/)) {
-      cleanPhone = '+' + cleanPhone;
-    }
+    // callerPhone is already clean from the main handler
+    const cleanPhone = callerPhone;
     
     // Send "processing" message before calling MCP
     ws.send(JSON.stringify({
@@ -196,19 +193,24 @@ async function handleReservationTool(ws: any, functionCallId: string, args: stri
       type: 'response.create'
     }));
     
-    // Log the tool call
+    // Log the tool call with cleaned data
+    const cleanedParams = {
+      ...params,
+      tel: cleanPhone  // Use cleaned phone number for transcript
+    };
+    
     sendTranscriptEvent(callId, {
       type: 'tool_call',
       tool_name: 's6792596_fancita_rezervation_supabase',
-      arguments: args,
+      arguments: JSON.stringify(cleanedParams),
       call_id: functionCallId,
       result: result,
       timestamp: new Date().toISOString(),
       metadata: { 
         toolName: 's6792596_fancita_rezervation_supabase',
         callId: functionCallId,
-        argumentCount: Object.keys(params).length,
-        argumentKeys: Object.keys(params),
+        argumentCount: Object.keys(cleanedParams).length,
+        argumentKeys: Object.keys(cleanedParams),
         success: result.success || false
       }
     });
@@ -236,11 +238,8 @@ async function handleOrderTool(ws: any, functionCallId: string, args: string, ca
     console.log('[openai-webhook] Executing order tool with args:', args);
     const params = JSON.parse(args);
     
-    // Extract clean phone number
-    let cleanPhone = callerPhone.match(/(\+?\d{8,15})/)?.[1] || callerPhone;
-    if (cleanPhone && !cleanPhone.startsWith('+') && cleanPhone.match(/^\d{8,15}$/)) {
-      cleanPhone = '+' + cleanPhone;
-    }
+    // callerPhone is already clean from the main handler
+    const cleanPhone = callerPhone;
     
     // Send processing message
     ws.send(JSON.stringify({
@@ -299,19 +298,24 @@ async function handleOrderTool(ws: any, functionCallId: string, args: string, ca
       type: 'response.create'
     }));
     
-    // Log the tool call
+    // Log the tool call with cleaned data
+    const cleanedParams = {
+      ...params,
+      tel: cleanPhone  // Use cleaned phone number for transcript
+    };
+    
     sendTranscriptEvent(callId, {
       type: 'tool_call',
       tool_name: 's6798488_fancita_order_supabase',
-      arguments: args,
+      arguments: JSON.stringify(cleanedParams),
       call_id: functionCallId,
       result: result,
       timestamp: new Date().toISOString(),
       metadata: { 
         toolName: 's6798488_fancita_order_supabase',
         callId: functionCallId,
-        argumentCount: Object.keys(params).length,
-        argumentKeys: Object.keys(params),
+        argumentCount: Object.keys(cleanedParams).length,
+        argumentKeys: Object.keys(cleanedParams),
         success: result.success || false
       }
     });
@@ -339,11 +343,8 @@ async function handleTransferTool(ws: any, functionCallId: string, args: string,
     console.log('[openai-webhook] Executing transfer tool with args:', args);
     const params = JSON.parse(args);
     
-    // Extract clean phone number
-    let cleanPhone = callerPhone.match(/(\+?\d{8,15})/)?.[1] || callerPhone;
-    if (cleanPhone && !cleanPhone.startsWith('+') && cleanPhone.match(/^\d{8,15}$/)) {
-      cleanPhone = '+' + cleanPhone;
-    }
+    // callerPhone is already clean from the main handler
+    const cleanPhone = callerPhone;
     
     // Send processing message
     ws.send(JSON.stringify({
@@ -500,7 +501,24 @@ export async function POST(req: Request): Promise<Response> {
       const acceptUrl = `https://api.openai.com/v1/realtime/calls/${encodeURIComponent(callId)}/accept`;
       // Extract caller info for template replacement in accept
       const callerFrom = event?.data?.sip_headers?.find((h: any) => h.name === 'From')?.value || 'unknown';
-      const callerPhone = callerFrom; // Store for use in tool handler
+      
+      // Extract clean phone number from SIP From header
+      let callerPhone = 'unknown';
+      if (callerFrom !== 'unknown') {
+        // Try to extract phone number from various SIP From header formats
+        const phoneMatch = callerFrom.match(/(?:^|["\s])(\+?\d{8,15})(?:["\s<>]|$)/);
+        if (phoneMatch) {
+          callerPhone = phoneMatch[1];
+          // Ensure phone number starts with +
+          if (!callerPhone.startsWith('+') && callerPhone.match(/^\d{8,15}$/)) {
+            callerPhone = '+' + callerPhone;
+          }
+        } else {
+          // Fallback: use original logic but log warning
+          console.warn(`[openai-webhook] ⚠️ Could not extract clean phone from SIP header: ${callerFrom}`);
+          callerPhone = callerFrom.includes('+') ? callerFrom : '+' + callerFrom.match(/\d+/)?.[0] || callerFrom;
+        }
+      }
       const acceptInstructions = replaceInstructionVariables(FANCITA_UNIFIED_INSTRUCTIONS, callerFrom, callId);
 
       const acceptPayload = {

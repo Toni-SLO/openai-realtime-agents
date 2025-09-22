@@ -51,7 +51,7 @@ app.post('/webhook', async (req, res) => {
         type: 'realtime',
         model: 'gpt-realtime',
         instructions: 'Ti si Maja iz restavracije Fančita. Pozdravi stranko v hrvaščini: "Restoran Fančita, Maja kod telefona. Kako vam mogu pomoći?" Odgovarjaj kratko in prijazno.',
-        voice: 'marin',
+        voice: process.env.OPENAI_REALTIME_VOICE || 'marin',
         modalities: ['text', 'audio'],
         audio: {
           input: { format: 'g711_ulaw', sample_rate: 8000 },

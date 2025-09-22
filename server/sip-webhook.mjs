@@ -1632,37 +1632,7 @@ async function processCall(callId, event, callerFrom, callerPhone) {
             pendingToolResults.get(callId).add(message.call_id);
             console.log(`[sip-webhook] 🔧 Tool call: ${message.name}`);
             
-            // Enhanced logging with reservation details
-            let toolDescription = message.name;
-            let reservationSummary = '';
-            
-            if (message.name === 's6792596_fancita_rezervation_supabase') {
-              toolDescription = 'Rezervacija stola';
-              reservationSummary = `${parsedArgs.name || 'N/A'} | ${parsedArgs.date || 'N/A'} ${parsedArgs.time || 'N/A'} | ${parsedArgs.guests_number || 'N/A'} osoba/e | ${parsedArgs.location || 'terasa'} | Tel: ${parsedArgs.tel || 'N/A'}`;
-            } else if (message.name === 's6798488_fancita_order_supabase') {
-              toolDescription = 'Narudžba hrane';
-              const itemsCount = parsedArgs.items?.length || 0;
-              reservationSummary = `${parsedArgs.name || 'N/A'} | ${parsedArgs.date || 'N/A'} ${parsedArgs.delivery_time || 'N/A'} | ${itemsCount} stavki | ${parsedArgs.total || 'N/A'}€ | ${parsedArgs.delivery_type || 'N/A'}`;
-            } else if (message.name === 'end_call') {
-              toolDescription = 'Završetak poziva';
-              reservationSummary = parsedArgs.reason || 'Poziv završen';
-            }
-            
-            logTranscriptEvent(callId, {
-              type: 'tool_call',
-              tool_name: message.name,
-              tool_description: toolDescription,
-              arguments: parsedArgs,
-              call_id: message.call_id,
-              reservation_summary: reservationSummary,
-              timestamp: new Date().toISOString(),
-              metadata: {
-                toolName: message.name,
-                callId: message.call_id,
-                argumentCount: Object.keys(parsedArgs).length,
-                reservationData: parsedArgs
-              }
-            });
+            // NOTE: Transcript logging moved to handleToolCall after argument cleaning
           } else if (message.type === 'conversation.item.created' && message.item?.type === 'function_call_output') {
             // Tool call result
             const output = message.item.output || {};
@@ -1962,6 +1932,8 @@ async function getFullMenu(language = 'hr') {
 async function handleToolCall(ws, message, callerPhone, callId) {
   try {
     console.log('[sip-webhook] 🔧 Tool call:', message.name);
+    console.log('[sip-webhook] 🔧 DEBUG callerPhone:', callerPhone);
+    console.log('[sip-webhook] 🔧 DEBUG callId:', callId);
     
     // Execute tool call directly without processing message
 
@@ -2014,6 +1986,54 @@ async function handleToolCall(ws, message, callerPhone, callId) {
     } else if (message.name === 's6792596_fancita_rezervation_supabase' || message.name === 's6798488_fancita_order_supabase') {
       // CRITICAL: Validate MCP parameters before calling
       const args = JSON.parse(message.arguments);
+      console.log('[sip-webhook] 🔧 DEBUG Original args:', JSON.stringify(args, null, 2));
+      
+      // Add/fix tel (clean phone number) and source_id
+      if (callerPhone) {
+        if (args.tel && args.tel !== callerPhone) {
+          console.log(`[sip-webhook] 📞 Replacing tel parameter: "${args.tel}" -> "${callerPhone}"`);
+        } else if (!args.tel) {
+          console.log(`[sip-webhook] 📞 Added tel parameter: ${callerPhone}`);
+        }
+        args.tel = callerPhone; // Always use clean phone number, not SIP header
+      }
+      if (!args.source_id && callId) {
+        args.source_id = callId;
+        console.log(`[sip-webhook] 🆔 Added source_id parameter: ${args.source_id}`);
+      }
+      
+      console.log('[sip-webhook] 🔧 DEBUG Final args:', JSON.stringify(args, null, 2));
+      
+      // Generate transcript with cleaned arguments
+      let toolDescription = message.name;
+      let reservationSummary = '';
+      
+      if (message.name === 's6792596_fancita_rezervation_supabase') {
+        toolDescription = 'Rezervacija stola';
+        reservationSummary = `${args.name || 'N/A'} | ${args.date || 'N/A'} ${args.time || 'N/A'} | ${args.guests_number || 'N/A'} osoba/e | ${args.location || 'terasa'} | Tel: ${args.tel || 'N/A'}`;
+      } else if (message.name === 's6798488_fancita_order_supabase') {
+        toolDescription = 'Narudžba hrane';
+        const itemsCount = args.items?.length || 0;
+        reservationSummary = `${args.name || 'N/A'} | ${args.date || 'N/A'} ${args.delivery_time || 'N/A'} | ${itemsCount} stavki | ${args.total || 'N/A'}€ | ${args.delivery_type || 'N/A'}`;
+      }
+      
+      // Log transcript with cleaned arguments
+      logTranscriptEvent(callId, {
+        type: 'tool_call',
+        tool_name: message.name,
+        tool_description: toolDescription,
+        arguments: args, // Use cleaned arguments
+        call_id: message.call_id,
+        reservation_summary: reservationSummary,
+        timestamp: new Date().toISOString(),
+        metadata: {
+          toolName: message.name,
+          callId: message.call_id,
+          argumentCount: Object.keys(args).length,
+          reservationData: args // Use cleaned arguments
+        }
+      });
+      
       const validation = validateMCPParameters(message.name, args);
       
       if (!validation.valid) {
@@ -2075,7 +2095,7 @@ async function handleToolCall(ws, message, callerPhone, callId) {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             action: message.name,
-            data: JSON.parse(message.arguments)
+            data: args
           })
         });
 
@@ -2107,7 +2127,7 @@ async function handleToolCall(ws, message, callerPhone, callId) {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             action: message.name,
-            data: JSON.parse(message.arguments)
+            data: args // Use the same args with added tel and source_id
           })
         });
 
@@ -2307,28 +2327,8 @@ async function handleToolCall(ws, message, callerPhone, callId) {
       }
     }));
 
-    // Obnovimo GA transkripcijo po tool klicu
-    ws.send(JSON.stringify({
-      type: 'session.update',
-      session: {
-        type: 'realtime',
-        model: 'gpt-realtime',
-        audio: {
-          input: {
-            format: { type: 'audio/pcmu' },
-            transcription: {
-              model: 'gpt-4o-transcribe',
-              language: callLanguages.get(callId) || 'hr'
-            },
-            turn_detection: { type: 'server_vad' }
-          },
-          output: {
-            format: { type: 'audio/pcmu' },
-            voice: 'marin'
-          }
-        }
-      }
-    }));
+    // OPOMBA: session.update po tool klicu odstranjen, ker povzroča "Cannot update voice" napake
+    // Transkripcijski jezik se avtomatsko posodobi preko switch_language tool-a
     
     // Trigger response so Maja can react to the tool result
     ws.send(JSON.stringify({ type: 'response.create' }));
