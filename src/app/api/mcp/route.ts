@@ -136,12 +136,13 @@ let mcpTools: any[] = [
         date: { type: 'string', description: 'Reservation date (YYYY-MM-DD)' },
         time: { type: 'string', description: 'Reservation time (HH:MM)' },
         guests_number: { type: 'number', description: 'Number of guests' },
+        duration_min: { type: 'number', description: 'Reservation duration in minutes' },
         location: { type: 'string', description: 'Location: vrt, terasa, unutra' },
         notes: { type: 'string', description: 'Special notes' },
         tel: { type: 'string', description: 'Telephone number' },
         source_id: { type: 'string', description: 'Conversation ID' }
       },
-      required: ['name', 'date', 'time', 'guests_number']
+      required: ['name', 'date', 'time', 'guests_number', 'duration_min']
     }
   },
   {
@@ -457,6 +458,26 @@ export async function POST(request: NextRequest) {
     const { action, data } = await request.json();
     console.log('🔧 [MCP] API called with:', { action, data });
     console.log('🔧 [MCP] Is availability check?', action === 's7260221_check_availability');
+
+    // Ensure duration_min for reservation actions based on settings
+    try {
+      if (action === 'createReservation' || action === 's6792596_fancita_rezervation_supabase') {
+        const settings = require('../../../../server/settings.json');
+        const availability = settings.availability || {};
+        const threshold = availability.duration?.threshold || 4;
+        const small = availability.duration?.smallGroup || 90;
+        const large = availability.duration?.largeGroup || 120;
+        const people = Number(data?.guests_number);
+        if (!data.duration_min) {
+          data.duration_min = people <= threshold ? small : large;
+        }
+      }
+    } catch (e) {
+      console.warn('[mcp] Could not compute duration_min, using default if missing');
+      if ((action === 'createReservation' || action === 's6792596_fancita_rezervation_supabase') && !data.duration_min) {
+        data.duration_min = 90;
+      }
+    }
 
     let result;
     // Map action names to full tool names

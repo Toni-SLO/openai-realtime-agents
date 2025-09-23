@@ -33,6 +33,7 @@ function extractCleanPhone(rawPhone: string): string {
   return rawPhone;
 }
 import { replaceInstructionVariablesSync } from '../shared/instructionVariables';
+import { parseDateExpression } from '../../lib/slovenianTime';
 
 // Unified agent with all restaurant capabilities
 export const unifiedRestoranAgent = new RealtimeAgent({
@@ -40,6 +41,24 @@ export const unifiedRestoranAgent = new RealtimeAgent({
   voice: process.env.OPENAI_REALTIME_VOICE || 'marin',
   instructions: replaceInstructionVariablesSync(FANCITA_UNIFIED_INSTRUCTIONS),
   tools: [
+    // Local time utility tool (Slovenian timezone)
+    tool({
+      name: 'get_slovenian_time',
+      description: 'Vrne trenutni datum in uro v slovenskem časovnem pasu (Europe/Ljubljana)',
+      parameters: { type: 'object', properties: {} } as any,
+      execute: async () => {
+        const { getSlovenianDateTime } = await import('../../lib/slovenianTime');
+        const now = getSlovenianDateTime();
+        return {
+          now_iso: now.toISOString(),
+          date: now.toISOString().split('T')[0],
+          time: now.toTimeString().slice(0, 5),
+          timezone: 'Europe/Ljubljana',
+          locale: 'sl-SI',
+          formatted: now.toLocaleString('sl-SI', { timeZone: 'Europe/Ljubljana' })
+        };
+      }
+    }),
     // Direct MCP tool for reservations (if MCP_SERVER_URL is configured)
     ...(process.env.MCP_SERVER_URL ? [{
       type: 'mcp' as const,
@@ -65,11 +84,21 @@ export const unifiedRestoranAgent = new RealtimeAgent({
           const callerPhone = extractCleanPhone(rawCallerPhone);
           const conversationId = details?.context?.system__conversation_id || '{{system__conversation_id}}';
           
+          // Load settings and compute duration_min based on guests_number
+          const settings = require('../../../../server/settings.json');
+          const availabilitySettings = settings.availability || {};
+          const duration_min = input.duration_min || (
+            (input.guests_number <= (availabilitySettings.duration?.threshold || 4))
+              ? (availabilitySettings.duration?.smallGroup || 90)
+              : (availabilitySettings.duration?.largeGroup || 120)
+          );
+
           const reservationData = {
             name: input.name,
-            date: input.date,
+            date: parseDateExpression(input.date),
             time: input.time,
             guests_number: input.guests_number,
+            duration_min,
             tel: callerPhone,
             location: input.location || 'terasa',
             notes: input.notes || '—',
@@ -252,7 +281,7 @@ export const unifiedRestoranAgent = new RealtimeAgent({
 
           // Prepare request data with defaults from settings
           const requestData = {
-            date: input.date,
+            date: parseDateExpression(input.date),
             time: input.time,
             people: input.people,
             location: input.location,

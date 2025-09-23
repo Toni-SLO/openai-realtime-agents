@@ -586,7 +586,7 @@ Primer strukture:
 - **NIKOLI ne kliči end_call** med pogovorom ali če gost še vedno sprašuje
 
 ## 11) Časovne pretvorbe
-**KRITIČNO - ČASOVNI PAS**: Vedno uporabljaj **SLOVENSKI ČAS (Europe/Ljubljana)**!
+**KRITIČNO - ČASOVNI PAS**: Vedno uporabljaj **SLOVENSKI ČAS (Europe/Ljubljana)** v VSEH izračunih in sklepih. Agent mora imeti pravilen lokalni čas od začetka seje (posredovan v navodilih). Po potrebi smeš uporabiti tool 'get_slovenian_time' za osvežitev notranje ure, ne pa šele na zahtevo uporabnika.
 
 **DATUM DOLOČITEV:**
 - **"danas/today/heute/oggi/hoy/aujourd'hui"** → današnji datum v **slovenskem času**
@@ -607,7 +607,7 @@ Primer strukture:
 **SISTEMSKE FUNKCIJE ZA SLOVENSKI ČAS:**
 - Za "danes" uporabi funkcijo getSlovenianToday() → vrne YYYY-MM-DD v slovenskem času
 - Za "jutri" uporabi funkcijo getSlovenianTomorrow() → vrne YYYY-MM-DD v slovenskem času  
-- **NIKOLI ne uporabljaj** new Date() za določitev datuma - vedno uporabi slovenske funkcije!
+- **NIKOLI ne uporabljaj** new Date() za določitev datuma - vedno uporabi slovenske funkcije oz. tool 'get_slovenian_time'!
 
 **PRIMER UPORABE:**
 - Gost: "Rad bi rezerviral mizo za danes ob 19:00"
@@ -853,15 +853,16 @@ export const FANCITA_RESERVATION_TOOL = {
     additionalProperties: false,
     properties: {
       name: { type: 'string' as const, description: 'Guest name for the reservation' },
-      date: { type: 'string' as const, description: 'Reservation date in YYYY-MM-DD format' },
+      date: { type: 'string' as const, description: 'Reservation date in YYYY-MM-DD format (use Slovenian timezone, supports "danes"/"jutri")' },
       time: { type: 'string' as const, description: 'Reservation time in HH:MM format (24h)' },
       guests_number: { type: 'number' as const, description: 'Number of guests' },
+      duration_min: { type: 'number' as const, description: 'Reservation duration in minutes (computed from guests_number)' },
       tel: { type: 'string' as const, description: 'Guest phone number' },
       location: { type: 'string' as const, description: 'Table location preference', default: 'terasa' },
       notes: { type: 'string' as const, description: 'Special requests or notes' },
       source_id: { type: 'string' as const, description: 'Conversation or source identifier' },
     },
-    required: ['name', 'date', 'time', 'guests_number', 'tel', 'location', 'notes', 'source_id'],
+    required: ['name', 'date', 'time', 'guests_number', 'duration_min', 'tel', 'location', 'notes', 'source_id'],
   },
 };
 
@@ -872,7 +873,7 @@ export const FANCITA_CHECK_AVAILABILITY_TOOL = {
     type: 'object' as const,
     additionalProperties: false,
     properties: {
-      date: { type: 'string' as const, description: 'Reservation date in YYYY-MM-DD format' },
+      date: { type: 'string' as const, description: 'Reservation date in YYYY-MM-DD format (Slovenian timezone, supports "danes"/"jutri")' },
       time: { type: 'string' as const, description: 'Reservation time in HH:MM format (24h)' },
       people: { type: 'number' as const, description: 'Number of guests' },
       location: { type: 'string' as const, description: 'Table location preference: terasa or vrt', enum: ['terasa', 'vrt'] as const },

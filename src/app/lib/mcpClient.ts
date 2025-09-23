@@ -32,6 +32,7 @@ export class MCPClient {
     date: string;
     time: string;
     guests_number: number;
+    duration_min: number;
     tel: string;
     location?: string;
     notes?: string;

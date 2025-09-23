@@ -20,7 +20,7 @@
   "validation": {
     "minOrderTotal": 1.00,
     "minOrderTotalMessage": "Skupna cena mora biti pozitivna",
-    "requiredReservationFields": ["name", "date", "time", "guests_number"],
+    "requiredReservationFields": ["name", "date", "time", "guests_number", "duration_min"],
     "requiredOrderFields": ["name", "date", "delivery_time", "delivery_type", "delivery_address", "items", "total"],
     "forbiddenValues": ["", "—", "-", "User", "Guest", null],
     "timeFormatRegex": "^(\\d{1,2}):(\\d{2})$",

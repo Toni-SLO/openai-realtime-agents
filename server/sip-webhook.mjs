@@ -1276,7 +1276,10 @@ const server = http.createServer(async (req, res) => {
       // Accept the call first
       const acceptUrl = `https://api.openai.com/v1/realtime/calls/${encodeURIComponent(callId)}/accept`;
       const sharedInstructions = FANCITA_UNIFIED_INSTRUCTIONS();
-      const instructions = sharedReplaceVariables(sharedInstructions, callerFrom, callId);
+      const baseInstructions = sharedReplaceVariables(sharedInstructions, callerFrom, callId);
+      const nowSl = new Date(new Date().toLocaleString('en-US', { timeZone: 'Europe/Ljubljana' }));
+      const nowStr = nowSl.toLocaleString('sl-SI', { timeZone: 'Europe/Ljubljana' });
+      const instructions = `${baseInstructions}\n\n[Timezone] Vedno uporabljaj Europe/Ljubljana. Trenutni datum in čas v Sloveniji: ${nowStr}.`;
       
       // Debug: Check if instructions contain Croatian greeting
       const hasCroatianGreeting = instructions.includes('Restoran Fančita, Maja kod telefona');
@@ -1459,7 +1462,15 @@ async function processCall(callId, event, callerFrom, callerPhone) {
         
         // Počakamo dlje pred dodajanjem tools - KOT V DELUJOČI VERZIJI
         setTimeout(() => {
-          const tools = [FANCITA_RESERVATION_TOOL, FANCITA_ORDER_TOOL, FANCITA_HANDOFF_TOOL, FANCITA_HANGUP_TOOL, FANCITA_MENU_TOOL, FANCITA_LANGUAGE_TOOL];
+          const tools = [
+            {
+              type: 'function',
+              name: 'get_slovenian_time',
+              description: 'Vrne trenutni datum/uro v Europe/Ljubljana',
+              parameters: { type: 'object', properties: {} }
+            },
+            FANCITA_RESERVATION_TOOL, FANCITA_ORDER_TOOL, FANCITA_HANDOFF_TOOL, FANCITA_HANGUP_TOOL, FANCITA_MENU_TOOL, FANCITA_LANGUAGE_TOOL
+          ];
           
           // Pošljemo session.update s tools po uspešni vzpostavitvi osnovne povezave
           ws.send(JSON.stringify({
@@ -1500,6 +1511,7 @@ async function processCall(callId, event, callerFrom, callerPhone) {
             console.log('[sip-webhook] 🔄 User transcript received:', message.transcript);
             
             const currentLang = callLanguages.get(callId) || 'hr';
+            try { lastUserUtterance.set(callId, (message.transcript || '').toLowerCase()); } catch {}
             logTranscriptEvent(callId, {
               type: 'message',
               role: 'user',
@@ -1952,6 +1964,9 @@ async function getFullMenu(language = 'hr') {
   }
 }
 
+// Track last user utterance per call for date keyword detection
+const lastUserUtterance = new Map();
+
 // Tool call handler
 async function handleToolCall(ws, message, callerPhone, callId) {
   try {
@@ -2007,6 +2022,17 @@ async function handleToolCall(ws, message, callerPhone, callId) {
       const switchMessage = `🌍 JEZIK PREKLOPLJEN: ${languageCode.toUpperCase()} (${languageName})\n📝 Zaznane fraze: "${detectedPhrases}"\n✅ Transkripcijski model posodobljen na ${languageCode}\n🤖 NAVODILO: Nadaljuj pogovor v jeziku ${languageName} iz konteksta prejšnjega pogovora. Ne sprašuj ponovno "Kako lahko pomagam?" ampak direktno nadaljuj z ustreznim vprašanjem glede na to, kar je gost že omenil.`;
       
       result = { success: true, data: switchMessage };
+    } else if (message.name === 'get_slovenian_time') {
+      // Return current Slovenian time
+      const now = new Date(new Date().toLocaleString('en-US', { timeZone: 'Europe/Ljubljana' }));
+      result = { success: true, data: {
+        now_iso: now.toISOString(),
+        date: now.toISOString().split('T')[0],
+        time: now.toTimeString().slice(0, 5),
+        timezone: 'Europe/Ljubljana',
+        locale: 'sl-SI',
+        formatted: now.toLocaleString('sl-SI', { timeZone: 'Europe/Ljubljana' })
+      }};
     } else if (message.name === 's7260221_check_availability') {
       // Availability check via MCP
       // Parse args safely
@@ -2017,6 +2043,8 @@ async function handleToolCall(ws, message, callerPhone, callId) {
         console.warn('[sip-webhook] ⚠️ Availability args parse failed, using empty object');
         args = {};
       }
+
+      // Date normalization is handled by model via instructions + get_slovenian_time tool
 
       // Load defaults from settings
       const availability = settings.availability || {};
@@ -2090,6 +2118,27 @@ async function handleToolCall(ws, message, callerPhone, callId) {
           }
         } catch {}
 
+        // Derive request date localized to Slovenia (for clarity)
+        let request_date_local = null;
+        try {
+          const reqDateIso = result?.request?.date;
+          if (typeof reqDateIso === 'string') {
+            const d = new Date(reqDateIso);
+            request_date_local = d.toLocaleString('sl-SI', { timeZone: 'Europe/Ljubljana' });
+          }
+        } catch {}
+
+        // Build a display-friendly copy of raw response with localized date
+        let rawResponse_localized = result;
+        try {
+          const clone = JSON.parse(JSON.stringify(result));
+          if (clone && clone.request && typeof clone.request.date === 'string') {
+            const d = new Date(clone.request.date);
+            clone.request.date_local = d.toLocaleString('sl-SI', { timeZone: 'Europe/Ljubljana' });
+          }
+          rawResponse_localized = clone;
+        } catch {}
+
         // Log tool_result to transcript with full response
         logTranscriptEvent(callId, {
           type: 'tool_result',
@@ -2101,7 +2150,8 @@ async function handleToolCall(ws, message, callerPhone, callId) {
             mode: 'mcp',
             endpoint: mcpApiUrl,
             requestData,
-            rawResponse: result
+            rawResponse_localized,
+            request_date_local
           }
         });
       } catch (error) {
@@ -2142,6 +2192,23 @@ async function handleToolCall(ws, message, callerPhone, callId) {
         console.log(`[sip-webhook] 🆔 Added source_id parameter: ${args.source_id}`);
       }
       
+      // Ensure duration_min for reservations based on settings
+      if (message.name === 's6792596_fancita_rezervation_supabase') {
+        try {
+          const availability = settings.availability || {};
+          const threshold = availability.duration?.threshold || 4;
+          const small = availability.duration?.smallGroup || 90;
+          const large = availability.duration?.largeGroup || 120;
+          const people = Number(args.guests_number || args.people);
+          if (!args.duration_min) {
+            args.duration_min = people <= threshold ? small : large;
+            console.log(`[sip-webhook] ⏱ Added duration_min=${args.duration_min} (people=${people})`);
+          }
+        } catch (e) {
+          if (!args.duration_min) args.duration_min = 90;
+        }
+      }
+
       console.log('[sip-webhook] 🔧 DEBUG Final args:', JSON.stringify(args, null, 2));
       
       // Generate transcript with cleaned arguments
@@ -2150,6 +2217,11 @@ async function handleToolCall(ws, message, callerPhone, callId) {
       
       if (message.name === 's6792596_fancita_rezervation_supabase') {
         toolDescription = 'Rezervacija stola';
+        // Normalize date expressions to Slovenian timezone (danes/jutri)
+        try {
+          const { parseDateExpression } = require('../dist/src/app/lib/slovenianTime');
+          if (args.date) args.date = parseDateExpression(args.date);
+        } catch {}
         reservationSummary = `${args.name || 'N/A'} | ${args.date || 'N/A'} ${args.time || 'N/A'} | ${args.guests_number || 'N/A'} osoba/e | ${args.location || 'terasa'} | Tel: ${args.tel || 'N/A'}`;
       } else if (message.name === 's6798488_fancita_order_supabase') {
         toolDescription = 'Narudžba hrane';

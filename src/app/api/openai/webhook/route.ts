@@ -3,6 +3,7 @@
 
 // Import shared instructions
 import { FANCITA_UNIFIED_INSTRUCTIONS } from '../../../agentConfigs/shared/instructions';
+import { parseDateExpression, getSlovenianDateTime } from '../../../lib/slovenianTime';
 import { replaceInstructionVariables } from '../../../agentConfigs/shared/instructionVariables';
 import { NextResponse } from 'next/server';
 
@@ -145,7 +146,7 @@ async function handleCheckAvailabilityTool(ws: any, functionCallId: string, args
     
     // Prepare request data with defaults from settings
     const requestData = {
-      date: params.date,
+      date: parseDateExpression(params.date),
       time: params.time,
       people: params.people,
       location: params.location,
@@ -306,9 +307,23 @@ async function handleReservationTool(ws: any, functionCallId: string, args: stri
         action: 's6792596_fancita_rezervation_supabase',
         data: {
           name: params.name,
-          date: params.date,
+          date: parseDateExpression(params.date),
           time: params.time,
           guests_number: params.guests_number,
+          // Compute duration_min from settings if not provided
+          duration_min: (() => {
+            try {
+              const settings = require('../../../../server/settings.json');
+              const availability = settings.availability || {};
+              const threshold = availability.duration?.threshold || 4;
+              const small = availability.duration?.smallGroup || 90;
+              const large = availability.duration?.largeGroup || 120;
+              const people = Number(params.guests_number);
+              return params.duration_min || (people <= threshold ? small : large);
+            } catch {
+              return params.duration_min || 90;
+            }
+          })(),
           location: params.location || 'terasa',
           notes: params.notes || '—',
           tel: cleanPhone,
@@ -661,7 +676,11 @@ export async function POST(req: Request): Promise<Response> {
           callerPhone = callerFrom.includes('+') ? callerFrom : '+' + callerFrom.match(/\d+/)?.[0] || callerFrom;
         }
       }
-      const acceptInstructions = await replaceInstructionVariables(FANCITA_UNIFIED_INSTRUCTIONS);
+      const slNow = getSlovenianDateTime();
+      const nowStr = slNow.toLocaleString('sl-SI', { timeZone: 'Europe/Ljubljana' });
+      const acceptInstructions = await replaceInstructionVariables(
+        `${FANCITA_UNIFIED_INSTRUCTIONS}\n\n[Timezone] Vedno uporabljaj Europe/Ljubljana. Trenutni čas v Sloveniji: ${nowStr}.`
+      );
 
       const acceptPayload = {
         type: 'realtime',
@@ -767,6 +786,12 @@ export async function POST(req: Request): Promise<Response> {
         tools: [
           {
             type: 'function',
+            name: 'get_slovenian_time',
+            description: 'Vrne trenutni datum/uro za Europe/Ljubljana. Uporabljaj to orodje za čas/datum.',
+            parameters: { type: 'object', properties: {} }
+          },
+          {
+            type: 'function',
             name: 's7260221_check_availability',
             description: 'MOCK: Always returns available status for testing',
             parameters: {
@@ -810,12 +835,13 @@ export async function POST(req: Request): Promise<Response> {
                           date: { type: 'string', description: 'Date of reservation (YYYY-MM-DD)' },
                           time: { type: 'string', description: 'Time of reservation (HH:MM)' },
                           guests_number: { type: 'number', description: 'Number of guests' },
+                          duration_min: { type: 'number', description: 'Reservation duration in minutes' },
                           location: { type: 'string', description: 'Location: vrt, terasa, or unutra' },
                           notes: { type: 'string', description: 'Additional notes' },
                           tel: { type: 'string', description: 'Phone number' },
                           source_id: { type: 'string', description: 'Source conversation ID' }
                         },
-                        required: ['name', 'date', 'time', 'guests_number', 'tel', 'source_id']
+                        required: ['name', 'date', 'time', 'guests_number', 'duration_min', 'tel', 'source_id']
                       }
                     },
                     {
@@ -961,6 +987,27 @@ export async function POST(req: Request): Promise<Response> {
                   console.log('[openai-webhook] 🚨 Function call ID:', functionCallId);
                   console.log('[openai-webhook] 🚨 Args:', args);
                   handleCheckAvailabilityTool(ws, functionCallId, args, callerPhone, callId);
+                } else if (toolName === 'get_slovenian_time') {
+                  try {
+                    const now = getSlovenianDateTime();
+                    const payload = {
+                      now_iso: now.toISOString(),
+                      date: now.toISOString().split('T')[0],
+                      time: now.toTimeString().slice(0, 5),
+                      timezone: 'Europe/Ljubljana',
+                      locale: 'sl-SI',
+                      formatted: now.toLocaleString('sl-SI', { timeZone: 'Europe/Ljubljana' })
+                    };
+                    ws.send(JSON.stringify({
+                      type: 'conversation.item.create',
+                      item: {
+                        type: 'function_call_output',
+                        call_id: functionCallId,
+                        output: JSON.stringify(payload)
+                      }
+                    }));
+                    ws.send(JSON.stringify({ type: 'response.create' }));
+                  } catch {}
                 } else if (toolName === 's6792596_fancita_rezervation_supabase') {
                   handleReservationTool(ws, functionCallId, args, callerPhone, callId);
                 } else if (toolName === 's6798488_fancita_order_supabase') {
