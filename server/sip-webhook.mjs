@@ -2055,7 +2055,7 @@ async function handleToolCall(ws, message, callerPhone, callId) {
         date: args.date,
         time: args.time,
         people: args.people || args.guests_number || 2,
-        location: args.location || 'terasa',
+        location: args.location,
         duration_min: args.duration_min || ( (args.people || args.guests_number || 2) <= durationThreshold
           ? (availability.duration?.smallGroup || 90)
           : (availability.duration?.largeGroup || 120)
@@ -2222,7 +2222,7 @@ async function handleToolCall(ws, message, callerPhone, callId) {
           const { parseDateExpression } = require('../dist/src/app/lib/slovenianTime');
           if (args.date) args.date = parseDateExpression(args.date);
         } catch {}
-        reservationSummary = `${args.name || 'N/A'} | ${args.date || 'N/A'} ${args.time || 'N/A'} | ${args.guests_number || 'N/A'} osoba/e | ${args.location || 'terasa'} | Tel: ${args.tel || 'N/A'}`;
+        reservationSummary = `${args.name || 'N/A'} | ${args.date || 'N/A'} ${args.time || 'N/A'} | ${args.guests_number || 'N/A'} osoba/e | ${args.location || 'N/A'} | Tel: ${args.tel || 'N/A'}`;
       } else if (message.name === 's6798488_fancita_order_supabase') {
         toolDescription = 'Narudžba hrane';
         const itemsCount = args.items?.length || 0;

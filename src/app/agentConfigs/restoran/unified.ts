@@ -100,7 +100,7 @@ export const unifiedRestoranAgent = new RealtimeAgent({
             guests_number: input.guests_number,
             duration_min,
             tel: callerPhone,
-            location: input.location || 'terasa',
+            location: input.location,
             notes: input.notes || '—',
             source_id: conversationId,
           };

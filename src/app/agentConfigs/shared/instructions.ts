@@ -22,7 +22,6 @@ export const FANCITA_UNIFIED_INSTRUCTIONS = `# Fančita Restaurant Agent
 ## 0) Sistem & konstante
 - tel vedno = {{system__caller_id}}
 - source_id vedno = {{system__conversation_id}}
-- Privzeta lokacija rezervacije: terasa
 - Kratki odgovori, brez ponavljanja po vsakem stavku; enkratna potrditev na koncu.
 
 ## 1) Jezik in pozdravljanje
@@ -156,7 +155,6 @@ export const FANCITA_UNIFIED_INSTRUCTIONS = `# Fančita Restaurant Agent
   - tel = {{system__caller_id}}
   - source_id = {{system__conversation_id}}
   - delivery_address = "Fančita" **SAMO** če delivery_type = "pickup"
-  - location = "terasa" (če ni izrecno zahtevano drugače)
   - notes = "—" (če ni posebnih želja)
 
 ### 5.3) Obvezno potrjevanje delivery_type
@@ -211,7 +209,17 @@ Vprašaj samo za manjkajoče podatke v tem vrstnem redu:
    - IT: "Per quante persone?"
    - ES: "¿Para cuántas personas?"
 
-2. date – v jeziku uporabnika:
+2. location – **OBVEZNO VPRAŠAJ** v jeziku uporabnika:
+   - HR: "Želite li rezervaciju na pokrivenoj terasi ili vani u vrtu?"
+   - SL: "Želite rezervacijo na pokriti terasi ali zunaj na vrtu?"
+   - EN: "Would you like a reservation on the covered terrace or outside in the garden?"
+   - DE: "Möchten Sie eine Reservierung auf der überdachten Terrasse oder draußen im Garten?"
+   - FR: "Souhaitez-vous une réservation sur la terrasse couverte ou dehors dans le jardin?"
+   - IT: "Vuole una prenotazione sulla terrazza coperta o fuori nel giardino?"
+   - ES: "¿Quiere una reserva en la terraza cubierta o afuera en el jardín?"
+   - **OBVEZNO**: Maja mora VEDNO vprašati za lokacijo - ni več privzete terase!
+
+3. date – v jeziku uporabnika:
    - HR: "Za koji datum?"
    - SL: "Za kateri datum?"
    - EN: "For which date?"
@@ -225,7 +233,7 @@ Vprašaj samo za manjkajoče podatke v tem vrstnem redu:
    - **"jutri/tomorrow"** = trenutni datum + 1 dan v **Sloveniji (Ljubljana)**
    - **VEDNO preveri**: Če je strežnik v Ameriki, ampak v Sloveniji že naslednji dan → uporabi slovenski datum!
 
-3. time – v jeziku uporabnika:
+4. time – v jeziku uporabnika:
    - HR: "U koje vrijeme?"
    - SL: "Ob kateri uri?"
    - EN: "At what time?"
@@ -236,9 +244,9 @@ Vprašaj samo za manjkajoče podatke v tem vrstnem redu:
    - **NIKOLI ne izmisli časa** (npr. 0:00) - vedno vprašaj gosta!
    - ES: "¿A qué hora?"
 
-4. name – vedno vprašaj (glej §5.5)
+5. name – vedno vprašaj (glej §5.5)
 
-5. **OPCIJSKO** notes – **NE vprašaj avtomatsko**. Vprašaj SAMO če gost omeni posebne potrebe.
+6. **OPCIJSKO** notes – **NE vprašaj avtomatsko**. Vprašaj SAMO če gost omeni posebne potrebe.
 
 **🚨 KRITIČNO - OBVEZNO PREVERJANJE ZASEDENOSTI:**
 **NIKOLI NE POTRDI REZERVACIJE BREZ PREVERJANJA ZASEDENOSTI!**
@@ -704,7 +712,7 @@ Ko gost sprašuje za "špagete", "špageti", "bolonjske špagete" ali "špageti 
   "time": "19:30",
   "guests_number": 4,
   "tel": "{{system__caller_id}}",
-  "location": "terasa",
+  "location": "vrt",
   "notes": "—",
   "source_id": "{{system__conversation_id}}"
 }
@@ -858,7 +866,7 @@ export const FANCITA_RESERVATION_TOOL = {
       guests_number: { type: 'number' as const, description: 'Number of guests' },
       duration_min: { type: 'number' as const, description: 'Reservation duration in minutes (computed from guests_number)' },
       tel: { type: 'string' as const, description: 'Guest phone number' },
-      location: { type: 'string' as const, description: 'Table location preference', default: 'terasa' },
+      location: { type: 'string' as const, description: 'Table location preference: "terasa" (covered terrace) or "vrt" (garden)' },
       notes: { type: 'string' as const, description: 'Special requests or notes' },
       source_id: { type: 'string' as const, description: 'Conversation or source identifier' },
     },
