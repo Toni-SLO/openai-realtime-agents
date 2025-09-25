@@ -2033,6 +2033,114 @@ async function handleToolCall(ws, message, callerPhone, callId) {
         locale: 'sl-SI',
         formatted: now.toLocaleString('sl-SI', { timeZone: 'Europe/Ljubljana' })
       }};
+    } else if (message.name === 's7355981_check_orders') {
+      console.log('[sip-webhook] 🔧 Handling s7355981_check_orders tool');
+      
+      try {
+        // Call Next.js MCP endpoint
+        const nextjsApiUrl = process.env.NEXTJS_API_URL || 'http://localhost:3000';
+        const mcpApiUrl = `${nextjsApiUrl}/api/mcp`;
+
+        console.log('[sip-webhook] 🔧 Calling MCP API for check orders:', mcpApiUrl);
+        
+        const response = await fetch(mcpApiUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 's7355981_check_orders',
+            data: {}
+          })
+        });
+
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+
+        const mcpResult = await response.json();
+        console.log('[sip-webhook] 🔧 MCP check orders result:', mcpResult);
+
+        // Parse result and normalize format
+        let pickup = 0, delivery = 0;
+        
+        if (mcpResult.success !== false) {
+          // Check if data is in MCP format (content array with text)
+          if (mcpResult.data?.content?.[0]?.text) {
+            try {
+              const ordersData = JSON.parse(mcpResult.data.content[0].text);
+              pickup = ordersData.pickup || 0;
+              delivery = ordersData.delivery || 0;
+              console.log(`[sip-webhook] 📊 Parsed MCP orders: pickup=${pickup}, delivery=${delivery}`);
+            } catch (parseError) {
+              console.warn('[sip-webhook] ⚠️ Failed to parse MCP orders data:', parseError.message);
+            }
+          }
+          // Fallback: check if data is direct object
+          else if (mcpResult.data && typeof mcpResult.data === 'object') {
+            pickup = mcpResult.data.pickup || 0;
+            delivery = mcpResult.data.delivery || 0;
+          } 
+          // Fallback: check if result is direct object
+          else if (mcpResult.pickup !== undefined && mcpResult.delivery !== undefined) {
+            pickup = mcpResult.pickup || 0;
+            delivery = mcpResult.delivery || 0;
+          }
+        }
+
+        // Normalize result format
+        const normalizedResult = { pickup, delivery };
+        
+        // Log to transcript for visibility
+        logTranscriptEvent(callId, {
+          type: 'tool_call',
+          tool_name: 's7355981_check_orders',
+          tool_description: 'Preverjanje trenutnih naročil',
+          arguments: {},
+          result: normalizedResult,
+          call_id: message.call_id,
+          timestamp: new Date().toISOString(),
+          metadata: {
+            toolName: 's7355981_check_orders',
+            callId: message.call_id,
+            pickup_orders: pickup,
+            delivery_orders: delivery
+          }
+        });
+
+        result = {
+          success: true,
+          ...normalizedResult
+        };
+
+      } catch (error) {
+        console.error('[sip-webhook] 🚨 s7355981_check_orders failed:', error);
+        
+        // Fallback values (middle range)
+        const fallbackResult = { pickup: 2, delivery: 2 };
+        
+        logTranscriptEvent(callId, {
+          type: 'tool_call',
+          tool_name: 's7355981_check_orders',
+          tool_description: 'Preverjanje trenutnih naročil (FALLBACK)',
+          arguments: {},
+          result: fallbackResult,
+          error: error.message,
+          call_id: message.call_id,
+          timestamp: new Date().toISOString(),
+          metadata: {
+            toolName: 's7355981_check_orders',
+            callId: message.call_id,
+            pickup_orders: fallbackResult.pickup,
+            delivery_orders: fallbackResult.delivery,
+            fallback: true
+          }
+        });
+
+        result = {
+          success: true,
+          ...fallbackResult,
+          fallback: true
+        };
+      }
     } else if (message.name === 's7260221_check_availability') {
       // Availability check via MCP
       // Parse args safely
@@ -2225,8 +2333,161 @@ async function handleToolCall(ws, message, callerPhone, callId) {
         reservationSummary = `${args.name || 'N/A'} | ${args.date || 'N/A'} ${args.time || 'N/A'} | ${args.guests_number || 'N/A'} osoba/e | ${args.location || 'N/A'} | Tel: ${args.tel || 'N/A'}`;
       } else if (message.name === 's6798488_fancita_order_supabase') {
         toolDescription = 'Narudžba hrane';
+        
+        // **DATUM**: Če manjka args.date, avtomatsko nastavi na danes (Europe/Ljubljana)
+        if (!args.date) {
+          try {
+            const { getSlovenianDateTime } = require('../dist/src/app/lib/slovenianTime');
+            const now = getSlovenianDateTime();
+            args.date = now.toISOString().split('T')[0]; // YYYY-MM-DD format
+            console.log(`[sip-webhook] 📅 Auto-set date to today (Slovenia): ${args.date}`);
+          } catch (e) {
+            console.warn('[sip-webhook] Could not set auto date, using fallback');
+            args.date = new Date().toISOString().split('T')[0];
+          }
+        }
+        
+        // **Pre-check ETA**: Pred klicanjem order tool-a pokliči s7355981_check_orders
+        console.log('[sip-webhook] 🔧 Pre-checking ETA before order...');
+        try {
+          const nextjsApiUrl = process.env.NEXTJS_API_URL || 'http://localhost:3000';
+          const mcpApiUrl = `${nextjsApiUrl}/api/mcp`;
+          
+          const etaResponse = await fetch(mcpApiUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              action: 's7355981_check_orders',
+              data: {}
+            })
+          });
+          
+          if (etaResponse.ok) {
+            const etaResult = await etaResponse.json();
+            console.log('[sip-webhook] 🔧 ETA pre-check result:', JSON.stringify(etaResult, null, 2));
+            
+            // Extract orders data from MCP response
+            let pickup = 0, delivery = 0;
+            if (etaResult.success && etaResult.data?.content?.[0]?.text) {
+              try {
+                const ordersData = JSON.parse(etaResult.data.content[0].text);
+                pickup = ordersData.pickup || 0;
+                delivery = ordersData.delivery || 0;
+                console.log(`[sip-webhook] 📊 Orders from Make.com: pickup=${pickup}, delivery=${delivery}`);
+              } catch (parseError) {
+                console.warn('[sip-webhook] ⚠️ Failed to parse orders data:', parseError.message);
+              }
+            } else {
+              console.warn('[sip-webhook] ⚠️ Invalid ETA response structure');
+            }
+            
+            // Calculate ETA based on settings and actual orders
+            const etaRules = settings.orders?.eta;
+            let eta_pickup_min = 25; // fallback
+            let eta_delivery_min = 27; // fallback
+            
+            if (etaRules) {
+              // Pickup ETA calculation
+              if (pickup <= 5) {
+                eta_pickup_min = etaRules.pickup?.count_0_5_min || 20;
+              } else {
+                eta_pickup_min = etaRules.pickup?.count_gt_5_min || 30;
+              }
+              
+              // Delivery ETA calculation
+              if (delivery === 0) {
+                eta_delivery_min = etaRules.delivery?.count_0_min || 15;
+              } else if (delivery === 1) {
+                eta_delivery_min = etaRules.delivery?.count_1_min || 20;
+              } else if (delivery >= 2 && delivery <= 3) {
+                eta_delivery_min = etaRules.delivery?.range_2_3_min || 30;
+              } else {
+                eta_delivery_min = etaRules.delivery?.range_gt_3_min || 45;
+              }
+              
+              console.log(`[sip-webhook] ⏰ ETA calculated: pickup=${eta_pickup_min}min (${pickup} orders), delivery=${eta_delivery_min}min (${delivery} orders)`);
+            }
+            
+            // Store ETA for ASAP handling
+        args._eta_pickup_min = eta_pickup_min;
+        args._eta_delivery_min = eta_delivery_min;
+        
+        // ETA calculation log removed - Maja now calculates ETA from instructions
+        console.log(`[sip-webhook] ⏰ ETA pre-calculated: pickup=${eta_pickup_min}min, delivery=${eta_delivery_min}min (for ASAP handling only)`);
+          }
+        } catch (etaError) {
+          console.warn('[sip-webhook] ⚠️ ETA pre-check failed:', etaError.message);
+        }
+        
+        // **ASAP handling**: Če delivery_time je "takoj"/"ASAP" ali manjka, nastavi na trenutni_čas + ETA
+        if (!args.delivery_time || args.delivery_time === 'takoj' || args.delivery_time === 'ASAP' || args.delivery_time === 'kar se da hitro') {
+          try {
+            const { getSlovenianDateTime } = require('../dist/src/app/lib/slovenianTime');
+            const now = getSlovenianDateTime();
+            
+            // Use calculated ETA from pre-check, or fallback to settings
+            let etaMinutes = 25; // Default fallback
+            
+            if (args._eta_pickup_min && args._eta_delivery_min) {
+              // Use pre-calculated ETA based on actual orders
+              etaMinutes = args.delivery_type === 'pickup' ? args._eta_pickup_min : args._eta_delivery_min;
+              console.log(`[sip-webhook] ⏰ Using pre-calculated ETA: ${etaMinutes} min for ${args.delivery_type}`);
+            } else {
+              // Fallback to settings
+              const etaRules = settings.orders?.eta;
+              if (etaRules && args.delivery_type) {
+                if (args.delivery_type === 'pickup') {
+                  etaMinutes = etaRules.pickup?.count_0_5_min || 20;
+                } else if (args.delivery_type === 'delivery') {
+                  etaMinutes = etaRules.delivery?.count_1_min || 20;
+                }
+              }
+              console.log(`[sip-webhook] ⏰ Using fallback ETA from settings: ${etaMinutes} min`);
+            }
+            
+            const deliveryTime = new Date(now.getTime() + etaMinutes * 60000);
+            args.delivery_time = deliveryTime.toTimeString().slice(0, 5); // HH:MM format
+            console.log(`[sip-webhook] ⏰ ASAP delivery_time set to: ${args.delivery_time} (current + ${etaMinutes}min)`);
+            
+            // Clean up temporary ETA values before MCP call
+            delete args._eta_pickup_min;
+            delete args._eta_delivery_min;
+          } catch (e) {
+            console.warn('[sip-webhook] Could not set ASAP delivery_time, using fallback');
+            args.delivery_time = '18:00'; // Safe fallback
+          }
+        }
+        
+        // **Validacija časa**: Če je zahtevani čas prezgodaj, prilagodi na najzgodnejši možni čas
+        try {
+          const { getSlovenianDateTime } = require('../dist/src/app/lib/slovenianTime');
+          const now = getSlovenianDateTime();
+          const currentTime = now.toTimeString().slice(0, 5);
+          
+          if (args.delivery_time < currentTime) {
+            console.log(`[sip-webhook] ⏰ Delivery time ${args.delivery_time} is too early, adjusting...`);
+            
+            // Add 30 minutes to current time as minimum
+            const minDeliveryTime = new Date(now.getTime() + 30 * 60000);
+            args.delivery_time = minDeliveryTime.toTimeString().slice(0, 5);
+            console.log(`[sip-webhook] ⏰ Adjusted delivery_time to: ${args.delivery_time}`);
+          }
+        } catch (e) {
+          console.warn('[sip-webhook] Could not validate delivery_time');
+        }
+        
         const itemsCount = args.items?.length || 0;
         reservationSummary = `${args.name || 'N/A'} | ${args.date || 'N/A'} ${args.delivery_time || 'N/A'} | ${itemsCount} stavki | ${args.total || 'N/A'}€ | ${args.delivery_type || 'N/A'}`;
+      }
+      
+      // **CLEAN UP ETA DATA**: Remove temporary ETA values before MCP call
+      if (args._eta_pickup_min) {
+        console.log(`[sip-webhook] 🧹 Cleaning up _eta_pickup_min: ${args._eta_pickup_min}`);
+        delete args._eta_pickup_min;
+      }
+      if (args._eta_delivery_min) {
+        console.log(`[sip-webhook] 🧹 Cleaning up _eta_delivery_min: ${args._eta_delivery_min}`);
+        delete args._eta_delivery_min;
       }
       
       // Log transcript with cleaned arguments

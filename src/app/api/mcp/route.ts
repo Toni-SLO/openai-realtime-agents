@@ -176,6 +176,15 @@ let mcpTools: any[] = [
       },
       required: ['name', 'date', 'delivery_time', 'delivery_type', 'delivery_address', 'items', 'total']
     }
+  },
+  {
+    name: 's7355981_check_orders',
+    description: 'Check current number of pickup and delivery orders',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+      required: []
+    }
   }
 ];
 
@@ -490,7 +499,8 @@ export async function POST(request: NextRequest) {
       's6792596_fancita_rezervation_supabase': 's6792596_fancita_rezervation_supabase',
       's6798488_fancita_order_supabase': 's6798488_fancita_order_supabase',
       'check_availability': 'check_availability',
-      's7260221_check_availability': 's7260221_check_availability'
+      's7260221_check_availability': 's7260221_check_availability',
+      's7355981_check_orders': 's7355981_check_orders'
     };
 
     const fullToolName = toolNameMap[action] || action;

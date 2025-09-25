@@ -35,6 +35,37 @@ function extractCleanPhone(rawPhone: string): string {
 import { replaceInstructionVariablesSync } from '../shared/instructionVariables';
 import { parseDateExpression } from '../../lib/slovenianTime';
 
+// ETA computation function based on settings.json rules
+function computeEtaFromSettings(pickup: number, delivery: number, settings: any) {
+  const etaRules = settings.orders?.eta;
+  if (!etaRules) {
+    // Fallback values if settings not available
+    return { eta_pickup_min: 25, eta_delivery_min: 27 };
+  }
+
+  // Pickup ETA calculation
+  let eta_pickup_min: number;
+  if (pickup <= 5) {
+    eta_pickup_min = etaRules.pickup?.count_0_5_min || 20;
+  } else {
+    eta_pickup_min = etaRules.pickup?.count_gt_5_min || 30;
+  }
+
+  // Delivery ETA calculation
+  let eta_delivery_min: number;
+  if (delivery === 0) {
+    eta_delivery_min = etaRules.delivery?.count_0_min || 15;
+  } else if (delivery === 1) {
+    eta_delivery_min = etaRules.delivery?.count_1_min || 20;
+  } else if (delivery >= 2 && delivery <= 3) {
+    eta_delivery_min = etaRules.delivery?.range_2_3_min || 30;
+  } else {
+    eta_delivery_min = etaRules.delivery?.range_gt_3_min || 45;
+  }
+
+  return { eta_pickup_min, eta_delivery_min };
+}
+
 // Unified agent with all restaurant capabilities
 export const unifiedRestoranAgent = new RealtimeAgent({
   name: 'fancita_restoran',
@@ -258,6 +289,13 @@ export const unifiedRestoranAgent = new RealtimeAgent({
       name: 's7260221_check_availability'
     }] : []),
 
+    // Direct MCP tool for check orders (if MCP_SERVER_URL is configured)
+    ...(process.env.MCP_SERVER_URL ? [{
+      type: 'mcp' as const,
+      server_url: process.env.MCP_SERVER_URL,
+      name: 's7355981_check_orders'
+    }] : []),
+
     // Direct MCP tool for handoff (if MCP_SERVER_URL is configured)
     ...(process.env.MCP_SERVER_URL ? [{
       type: 'mcp' as const,
@@ -436,6 +474,101 @@ export const unifiedRestoranAgent = new RealtimeAgent({
           const errorResult = "Napaka pri preklapljanju jezika. Nadaljujem v trenutnem jeziku.";
           console.log('[unified-agent] 🔧 Returning error result:', errorResult);
           return errorResult;
+        }
+      },
+    }),
+
+    // Fallback check orders tool
+    tool({
+      name: 's7355981_check_orders',
+      description: 'Check current number of pickup and delivery orders and calculate ETA. CRITICAL: This tool returns eta_pickup_min and eta_delivery_min values. You MUST use these exact values when telling customers pickup/delivery times. For pickup=7 orders, ETA is 30 minutes, NOT 20 minutes.',
+      parameters: { type: 'object', properties: {} } as any,
+      execute: async (input: any, details: any) => {
+        try {
+          console.log('[unified-agent] 🔧 Check orders tool called');
+          
+          // Call MCP API endpoint
+          let response;
+          try {
+            const url = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
+            response = await fetch(`${url}/api/mcp`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                action: 's7355981_check_orders',
+                data: {}
+              })
+            });
+          } catch (fetchError) {
+            console.error('[unified-agent] Check orders fetch failed:', fetchError);
+            throw new Error('Network error during check orders');
+          }
+
+          const result = await response.json();
+          console.log('[unified-agent] 🔧 Check orders result:', result);
+
+          if (result.success !== false) {
+            // Parse the result to get pickup and delivery counts
+            let pickup = 0, delivery = 0;
+            
+            // Check if data is in MCP format (content array with text)
+            if (result.data?.content?.[0]?.text) {
+              try {
+                const ordersData = JSON.parse(result.data.content[0].text);
+                pickup = ordersData.pickup || 0;
+                delivery = ordersData.delivery || 0;
+                console.log(`[unified-agent] 📊 Parsed MCP orders: pickup=${pickup}, delivery=${delivery}`);
+              } catch (parseError) {
+                console.warn('[unified-agent] ⚠️ Failed to parse MCP orders data:', parseError.message);
+              }
+            }
+            // Fallback: check if data is direct object
+            else if (result.data && typeof result.data === 'object') {
+              pickup = result.data.pickup || 0;
+              delivery = result.data.delivery || 0;
+            } 
+            // Fallback: check if result is direct object
+            else if (result.pickup !== undefined && result.delivery !== undefined) {
+              pickup = result.pickup || 0;
+              delivery = result.delivery || 0;
+            }
+
+            // Load settings and compute ETA
+            const settings = require('../../../../server/settings.json');
+            const eta = computeEtaFromSettings(pickup, delivery, settings);
+            
+            // Log ETA calculation for transcript visibility
+            console.log(`[ETA CALCULATION] Pickup orders: ${pickup}, Delivery orders: ${delivery}`);
+            console.log(`[ETA CALCULATION] Computed ETA - Pickup: ${eta.eta_pickup_min}min, Delivery: ${eta.eta_delivery_min}min`);
+            
+            return {
+              pickup,
+              delivery,
+              eta_pickup_min: eta.eta_pickup_min,
+              eta_delivery_min: eta.eta_delivery_min,
+              source: 'mcp_tool',
+              message: `CRITICAL: Use eta_pickup_min=${eta.eta_pickup_min} for pickup time, eta_delivery_min=${eta.eta_delivery_min} for delivery time. Do NOT use 20 minutes or any other value!`
+            };
+          } else {
+            throw new Error(result.error || 'Check orders failed');
+          }
+        } catch (error) {
+          console.error('[unified-agent] 🚨 Check orders failed:', error);
+          
+          // Fallback ETA values from settings
+          const settings = require('../../../../server/settings.json');
+          const fallbackEta = computeEtaFromSettings(2, 2, settings); // Use middle values for fallback
+          
+          console.log(`[ETA FALLBACK] Using fallback ETA - Pickup: ${fallbackEta.eta_pickup_min}min, Delivery: ${fallbackEta.eta_delivery_min}min`);
+          
+          return {
+            pickup: 2,
+            delivery: 2,
+            eta_pickup_min: fallbackEta.eta_pickup_min,
+            eta_delivery_min: fallbackEta.eta_delivery_min,
+            source: 'fallback',
+            error: error instanceof Error ? error.message : String(error)
+          };
         }
       },
     }),

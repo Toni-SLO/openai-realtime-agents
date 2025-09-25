@@ -72,6 +72,14 @@ export const INSTRUCTION_VARIABLES = {
   // Formatiran čas
   RESERVATION_HOURS: '{{RESERVATION_HOURS}}',  // "12:00-23:00"
   DELIVERY_HOURS: '{{DELIVERY_HOURS}}',        // "12:00-22:00"
+  
+  // ETA pravila
+  ETA_PICKUP_0_5: '{{ETA_PICKUP_0_5}}',        // settings.orders.eta.pickup.count_0_5_min
+  ETA_PICKUP_GT_5: '{{ETA_PICKUP_GT_5}}',      // settings.orders.eta.pickup.count_gt_5_min
+  ETA_DELIVERY_0: '{{ETA_DELIVERY_0}}',        // settings.orders.eta.delivery.count_0_min
+  ETA_DELIVERY_1: '{{ETA_DELIVERY_1}}',        // settings.orders.eta.delivery.count_1_min
+  ETA_DELIVERY_2_3: '{{ETA_DELIVERY_2_3}}',    // settings.orders.eta.delivery.range_2_3_min
+  ETA_DELIVERY_GT_3: '{{ETA_DELIVERY_GT_3}}',  // settings.orders.eta.delivery.range_gt_3_min
 };
 
 // Funkcija za nadomestitev spremenljivk v instrukcijah
@@ -95,11 +103,37 @@ export async function replaceInstructionVariables(instructionText: string): Prom
   result = result.replace(/\{\{RESERVATION_HOURS\}\}/g, reservationHours);
   result = result.replace(/\{\{DELIVERY_HOURS\}\}/g, deliveryHours);
   
+  // Nadomesti ETA pravila
+  if (settings.orders?.eta) {
+    result = result.replace(/\{\{ETA_PICKUP_0_5\}\}/g, settings.orders.eta.pickup?.count_0_5_min?.toString() || '20');
+    result = result.replace(/\{\{ETA_PICKUP_GT_5\}\}/g, settings.orders.eta.pickup?.count_gt_5_min?.toString() || '30');
+    result = result.replace(/\{\{ETA_DELIVERY_0\}\}/g, settings.orders.eta.delivery?.count_0_min?.toString() || '15');
+    result = result.replace(/\{\{ETA_DELIVERY_1\}\}/g, settings.orders.eta.delivery?.count_1_min?.toString() || '20');
+    result = result.replace(/\{\{ETA_DELIVERY_2_3\}\}/g, settings.orders.eta.delivery?.range_2_3_min?.toString() || '30');
+    result = result.replace(/\{\{ETA_DELIVERY_GT_3\}\}/g, settings.orders.eta.delivery?.range_gt_3_min?.toString() || '45');
+  }
+  
   return result;
 }
 
 // Sinhronska verzija za backward compatibility (uporablja cache)
 export function replaceInstructionVariablesSync(instructionText: string): string {
+  if (!cachedSettings) {
+    console.warn('Settings not cached yet, trying to load synchronously...');
+    // Poskusi naložiti settings sinhronsko
+    try {
+      const path = require('path');
+      const { pathToFileURL } = require('url');
+      const cwd = process.cwd();
+      const settingsPath = path.join(cwd, 'server', 'settings.json');
+      const settings = require(settingsPath);
+      cachedSettings = settings;
+      console.log('✅ Settings loaded synchronously:', Object.keys(settings));
+    } catch (error) {
+      console.warn('⚠️ Failed to load settings synchronously, using fallback values:', error.message);
+    }
+  }
+  
   if (!cachedSettings) {
     console.warn('Settings not cached yet, using fallback values');
     // Uporabi fallback vrednosti
@@ -125,6 +159,14 @@ export function replaceInstructionVariablesSync(instructionText: string): string
     result = result.replace(/\{\{RESERVATION_HOURS\}\}/g, reservationHours);
     result = result.replace(/\{\{DELIVERY_HOURS\}\}/g, deliveryHours);
     
+    // Fallback ETA pravila
+    result = result.replace(/\{\{ETA_PICKUP_0_5\}\}/g, '20');
+    result = result.replace(/\{\{ETA_PICKUP_GT_5\}\}/g, '30');
+    result = result.replace(/\{\{ETA_DELIVERY_0\}\}/g, '15');
+    result = result.replace(/\{\{ETA_DELIVERY_1\}\}/g, '20');
+    result = result.replace(/\{\{ETA_DELIVERY_2_3\}\}/g, '30');
+    result = result.replace(/\{\{ETA_DELIVERY_GT_3\}\}/g, '45');
+    
     return result;
   }
   
@@ -142,6 +184,16 @@ export function replaceInstructionVariablesSync(instructionText: string): string
   
   result = result.replace(/\{\{RESERVATION_HOURS\}\}/g, reservationHours);
   result = result.replace(/\{\{DELIVERY_HOURS\}\}/g, deliveryHours);
+  
+  // Cached ETA pravila
+  if (cachedSettings.orders?.eta) {
+    result = result.replace(/\{\{ETA_PICKUP_0_5\}\}/g, cachedSettings.orders.eta.pickup?.count_0_5_min?.toString() || '20');
+    result = result.replace(/\{\{ETA_PICKUP_GT_5\}\}/g, cachedSettings.orders.eta.pickup?.count_gt_5_min?.toString() || '30');
+    result = result.replace(/\{\{ETA_DELIVERY_0\}\}/g, cachedSettings.orders.eta.delivery?.count_0_min?.toString() || '15');
+    result = result.replace(/\{\{ETA_DELIVERY_1\}\}/g, cachedSettings.orders.eta.delivery?.count_1_min?.toString() || '20');
+    result = result.replace(/\{\{ETA_DELIVERY_2_3\}\}/g, cachedSettings.orders.eta.delivery?.range_2_3_min?.toString() || '30');
+    result = result.replace(/\{\{ETA_DELIVERY_GT_3\}\}/g, cachedSettings.orders.eta.delivery?.range_gt_3_min?.toString() || '45');
+  }
   
   return result;
 }

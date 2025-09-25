@@ -82,6 +82,20 @@
     },
     "tightThreshold": 80
   },
+  "orders": {
+    "eta": {
+      "pickup": {
+        "count_0_5_min": 20,
+        "count_gt_5_min": 30
+      },
+      "delivery": {
+        "count_0_min": 15,
+        "count_1_min": 20,
+        "range_2_3_min": 30,
+        "range_gt_3_min": 45
+      }
+    }
+  },
   "debug": {
     "logValidation": true,
     "logBusinessRules": true,
