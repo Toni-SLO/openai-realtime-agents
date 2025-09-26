@@ -602,7 +602,7 @@ const FANCITA_RESERVATION_TOOL = {
       date: { type: 'string', description: 'Date of reservation (YYYY-MM-DD)' },
       time: { type: 'string', description: 'Time of reservation (HH:MM)' },
       guests_number: { type: 'number', description: 'Number of guests' },
-      location: { type: 'string', description: 'Location: vrt, terasa, or unutra' },
+      location: { type: 'string', description: 'Location: vrt or terasa' },
       notes: { type: 'string', description: 'Additional notes' },
       tel: { type: 'string', description: 'Phone number' },
       source_id: { type: 'string', description: 'Source conversation ID' }
@@ -2803,8 +2803,8 @@ async function handleToolCall(ws, message, callerPhone, callId) {
     // OPOMBA: session.update po tool klicu odstranjen, ker povzroča "Cannot update voice" napake
     // Transkripcijski jezik se avtomatsko posodobi preko switch_language tool-a
     
-    // Trigger response so Maja can react to the tool result
-    ws.send(JSON.stringify({ type: 'response.create' }));
+    // OPOMBA: response.create odstranjen, ker povzroča "active response in progress" napake
+    // OpenAI Realtime API avtomatsko nadaljuje conversation po tool rezultatu
     
     console.log(`[sip-webhook] 🔧 Tool result sent: ${message.call_id} (${result?.success ? 'success' : 'failed'})`);
 

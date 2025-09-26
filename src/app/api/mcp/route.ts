@@ -51,59 +51,7 @@ function cleanData(data: any): any {
   return cleanObject(cleaned);
 }
 
-// Make.com webhook call function (fallback)
-async function callMakeWebhook(webhookId: string, data: any) {
-  const cleanedData = cleanData(data);
-
-  // Use environment variable if set, otherwise try different formats
-  const possibleUrls = [];
-  
-  // Add environment-specific URLs first
-  if (webhookId.includes('s6792596') && process.env.MAKE_WEBHOOK_RESERVATION) {
-    possibleUrls.push(process.env.MAKE_WEBHOOK_RESERVATION);
-  }
-  if (webhookId.includes('s6798488') && process.env.MAKE_WEBHOOK_ORDER) {
-    possibleUrls.push(process.env.MAKE_WEBHOOK_ORDER);
-  }
-  
-  // Fallback to auto-detection
-  possibleUrls.push(
-    `https://hook.eu2.make.com/${webhookId}`,
-    `https://eu2.make.com/hooks/${webhookId}`,
-    `https://hook.eu2.make.com/${webhookId.replace(/\D/g, '')}`,
-  );
-
-  for (const url of possibleUrls) {
-    try {
-      console.log(`Trying webhook call to: ${url}`);
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(cleanedData),
-      });
-
-      const responseText = await response.text();
-      console.log(`Webhook Response status:`, response.status);
-
-      if (response.ok) {
-        console.log(`✅ Webhook call successful to ${url}`);
-        try {
-          return JSON.parse(responseText);
-        } catch (e) {
-          return { success: true, message: responseText };
-        }
-      } else {
-        console.log(`❌ Webhook call failed to ${url}: ${response.status} ${response.statusText}`);
-      }
-    } catch (error) {
-      console.log(`Error calling webhook ${url}:`, error);
-    }
-  }
-
-  throw new Error(`All webhook URLs failed for ${webhookId}`);
-}
+// Webhook functionality removed - all tools now require MCP connection
 
 // Initialize MCP client
 let mcpClient: any = null;
@@ -137,7 +85,7 @@ let mcpTools: any[] = [
         time: { type: 'string', description: 'Reservation time (HH:MM)' },
         guests_number: { type: 'number', description: 'Number of guests' },
         duration_min: { type: 'number', description: 'Reservation duration in minutes' },
-        location: { type: 'string', description: 'Location: vrt, terasa, unutra' },
+        location: { type: 'string', description: 'Location: vrt or terasa' },
         notes: { type: 'string', description: 'Special notes' },
         tel: { type: 'string', description: 'Telephone number' },
         source_id: { type: 'string', description: 'Conversation ID' }
@@ -274,11 +222,11 @@ initializeMCPClient().then(success => {
   if (success) {
     console.log('🎉 MCP initialization completed successfully');
   } else {
-    console.log('🔄 MCP initialization failed, using fallback webhook mode');
+    console.log('❌ MCP initialization failed - MCP tools will not work');
   }
 }).catch(error => {
   console.error('💥 MCP initialization error:', error);
-  console.log('🔄 Using fallback webhook mode due to error');
+  console.log('❌ MCP connection failed - MCP tools will not work');
 });
 
 // GET endpoint for configuration check and available tools
@@ -329,8 +277,7 @@ export async function GET(request: NextRequest) {
           CallToolResultSchema
         );
       } else {
-        // Use fallback webhook
-        result = await callMakeWebhook('s6792596', testData);
+        throw new Error('MCP client not available - reservation test requires MCP connection');
       }
 
       return NextResponse.json({
@@ -378,8 +325,7 @@ export async function GET(request: NextRequest) {
           CallToolResultSchema
         );
       } else {
-        // Use fallback webhook
-        result = await callMakeWebhook('s6798488', testData);
+        throw new Error('MCP client not available - order test requires MCP connection');
       }
 
       return NextResponse.json({
@@ -415,32 +361,31 @@ export async function GET(request: NextRequest) {
         suggest_forwardSlots: 12
       };
 
-      let result;
-      if (process.env.MAKE_WEBHOOK_CHECK_AVAILABILITY) {
-        // Use direct webhook
-        const response = await fetch(process.env.MAKE_WEBHOOK_CHECK_AVAILABILITY, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(testData)
-        });
-        result = await response.json();
-      } else {
-        // Use fallback (this would normally not work without proper MCP setup)
-        result = { error: 'MAKE_WEBHOOK_CHECK_AVAILABILITY not configured' };
+      // Availability check test requires MCP connection
+      if (!mcpClient) {
+        throw new Error('MCP client not available - availability check test requires MCP connection');
       }
+
+      const result = await mcpClient.request(
+        {
+          method: 'tools/call',
+          params: { name: 's7260221_check_availability', arguments: testData }
+        },
+        CallToolResultSchema
+      );
 
       return NextResponse.json({
         success: true,
         message: 'Availability check test completed',
         result: result,
-        mode: 'webhook'
+        mode: 'mcp'
       });
     } catch (error) {
       console.error('Availability test failed:', error);
       return NextResponse.json({
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error',
-        mode: 'webhook'
+        mode: 'mcp'
       }, { status: 500 });
     }
   }
@@ -494,7 +439,6 @@ export async function POST(request: NextRequest) {
       'createReservation': 's6792596_fancita_rezervation_supabase',
       'createOrder': 's6798488_fancita_order_supabase',
       'transfer_to_staff': 'transfer_to_staff',
-      'check_availability': 'check_availability',
       // Direct tool name mapping
       's6792596_fancita_rezervation_supabase': 's6792596_fancita_rezervation_supabase',
       's6798488_fancita_order_supabase': 's6798488_fancita_order_supabase',
@@ -517,7 +461,7 @@ export async function POST(request: NextRequest) {
           attempts++;
         }
         if (!mcpClient) {
-          console.log('⚠️ MCP client not ready after 5s, using webhook fallback');
+          console.log('⚠️ MCP client not ready after 5s - MCP tools will fail');
         }
       }
       
@@ -532,39 +476,14 @@ export async function POST(request: NextRequest) {
           CallToolResultSchema
         );
       } else {
-        console.log('⚠️ MCP client not ready, falling back to webhooks');
-        // Fall through to webhook fallback
+        console.log('⚠️ MCP client not ready - MCP connection required');
+        // No fallback - MCP tools require MCP connection
       }
     }
     
     if (!result) {
-      // Use fallback webhook
-      console.log('🔄 Using fallback webhook for:', action);
-      
-      // Special handling for check_availability
-      if (action === 'check_availability' || action === 's7260221_check_availability') {
-        console.log('🔄 Using direct webhook for availability check');
-        if (process.env.MAKE_WEBHOOK_CHECK_AVAILABILITY) {
-          const response = await fetch(process.env.MAKE_WEBHOOK_CHECK_AVAILABILITY, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(data)
-          });
-          result = await response.json();
-        } else {
-          throw new Error('MAKE_WEBHOOK_CHECK_AVAILABILITY not configured');
-        }
-      } else {
-        // Original webhook logic for reservations and orders
-        let webhookId = 's6798488'; // default to order
-        if (action === 'createReservation' || action === 's6792596_fancita_rezervation_supabase') {
-          webhookId = 's6792596';
-        } else if (action === 'createOrder' || action === 's6798488_fancita_order_supabase') {
-          webhookId = 's6798488';
-        }
-        console.log('🔄 Using webhook ID:', webhookId, 'for action:', action);
-        result = await callMakeWebhook(webhookId, data);
-      }
+      // No webhook fallback - all MCP tools require MCP connection
+      throw new Error(`MCP tool '${action}' failed - MCP connection required, no webhook fallback available`);
     }
 
     // Special handling for availability check - parse the result properly

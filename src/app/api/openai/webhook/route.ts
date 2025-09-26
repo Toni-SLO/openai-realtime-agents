@@ -836,7 +836,7 @@ export async function POST(req: Request): Promise<Response> {
                           time: { type: 'string', description: 'Time of reservation (HH:MM)' },
                           guests_number: { type: 'number', description: 'Number of guests' },
                           duration_min: { type: 'number', description: 'Reservation duration in minutes' },
-                          location: { type: 'string', description: 'Location: vrt, terasa, or unutra' },
+                          location: { type: 'string', description: 'Location: vrt or terasa' },
                           notes: { type: 'string', description: 'Additional notes' },
                           tel: { type: 'string', description: 'Phone number' },
                           source_id: { type: 'string', description: 'Source conversation ID' }

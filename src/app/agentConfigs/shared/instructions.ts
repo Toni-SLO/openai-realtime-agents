@@ -203,6 +203,10 @@ Vprašaj samo za manjkajoče podatke v tem vrstnem redu:
    - IT: "Vuole una prenotazione sulla terrazza coperta o fuori nel giardino?"
    - ES: "¿Quiere una reserva en la terraza cubierta o afuera en el jardín?"
    - **OBVEZNO**: Maja mora VEDNO vprašati za lokacijo - ni več privzete terase!
+   
+   **🚨 KRITIČNO - LOKACIJA VREDNOSTI:**
+   - **SAMO 2 MOŽNOSTI**: "terasa" ali "vrt" (male črke)
+   - **NIKOLI ne uporabi nobene druge besede za lokacijo!**
 
 3. date – v jeziku uporabnika:
    - HR: "Za koji datum?"
@@ -594,7 +598,7 @@ Primer strukture:
 - NL: "Ons personeel belt u terug zodra iemand beschikbaar is. Dank voor uw begrip."
 
 ## 9) Validacije
-- location ∈ {vrt, terasa, unutra} (male črke)
+- location ∈ {vrt, terasa} (male črke) - **NIKOLI "unutra", "notranjost", "znotraj"!**
 - guests_number ≥ 1
 - date v formatu YYYY-MM-DD
 - time v formatu HH:MM (24h)
