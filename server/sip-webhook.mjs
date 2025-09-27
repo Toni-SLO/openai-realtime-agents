@@ -157,14 +157,14 @@ const acceptedCallIds = new Set();
 const pendingHangups = new Map();
 
 // Track detected language per call for dynamic transcription
-const callLanguages = new Map(); // callId -> language code (hr, sl, en, de, it, nl)
+const callLanguages = new Map(); // callId -> language code
 
 // Track pending tool results to prevent premature hangup
 const pendingToolResults = new Map(); // callId -> Set of pending tool call IDs
 
 // Function to update transcription language dynamically
 function updateTranscriptionLanguage(ws, callId, newLanguage) {
-  const validLanguages = ['hr', 'sl', 'en', 'de', 'it', 'nl'];
+  const validLanguages = (process.env.SUPPORTED_LANGUAGES || 'hr,sl,en,de,it,nl').split(',');
   if (!validLanguages.includes(newLanguage)) return;
   
   const currentLang = callLanguages.get(callId);
@@ -195,85 +195,10 @@ function updateTranscriptionLanguage(ws, callId, newLanguage) {
 // DISABLED: Language detection based on transcript is unreliable
 // Only agent (Maja) should decide language changes based on conversation context
 function detectUserLanguage_DISABLED(ws, callId, userTranscript) {
-  const text = userTranscript.toLowerCase();
+  // This function is completely disabled - language detection is handled by agent
+  console.log(`[sip-webhook] Language detection disabled - agent handles language switching via instructions`);
+  return; // Exit early - no pattern matching needed
   
-  // Language detection patterns based on USER speech patterns
-  const userLanguagePatterns = {
-    'sl': [
-      'rezervirati mizo',
-      'za nocoj',
-      'dobro vecer',
-      'hvala lepa',
-      'dve osebi',
-      'tri osebe'
-    ],
-    'hr': [
-      'htio bih',
-      'htjela bih', 
-      'izabrati stol',
-      'rezervirati stol',
-      'za večeras',
-      'dobro veče',
-      'hvala vam',
-      'dvije osobe',
-      'tri osobe'
-    ],
-    'en': [
-      'restaurant fančita, maja speaking',
-      'how can i help you',
-      'would you like to make',
-      'for how many people',
-      'at what time',
-      'is that correct'
-    ],
-    'de': [
-      'restaurant fančita, maja am telefon',
-      'wie kann ich ihnen helfen',
-      'möchten sie einen tisch',
-      'für wie viele personen',
-      'um welche uhrzeit',
-      'ist das korrekt'
-    ],
-    'it': [
-      'ristorante fančita, maja al telefono',
-      'come posso aiutarla',
-      'vuole prenotare un tavolo',
-      'per quante persone',
-      'a che ora',
-      'è corretto'
-    ],
-    'nl': [
-      'restaurant fančita, maja aan de telefoon',
-      'hoe kan ik u helpen',
-      'wilt u een tafel reserveren',
-      'voor hoeveel personen',
-      'hoe laat',
-      'is dat correct'
-    ],
-    'hr': [
-      'restoran fančita, maja kod telefona',
-      'kako vam mogu pomoći',
-      'želite li rezervirati',
-      'za koliko osoba',
-      'u koje vrijeme',
-      'je li točno'
-    ]
-  };
-  
-  // Check for language patterns
-  for (const [lang, patterns] of Object.entries(languagePatterns)) {
-    const matchedPattern = patterns.find(pattern => text.includes(pattern));
-    if (matchedPattern) {
-      console.log(`[sip-webhook] 🔍 Language detected: ${lang} (matched: "${matchedPattern}")`);
-      updateTranscriptionLanguage(ws, callId, lang);
-      return;
-    }
-  }
-  
-  // Log if no language pattern matched
-  console.log(`[sip-webhook] 🤷 No language pattern matched for: "${text.substring(0, 100)}..."`);
-}
-
 // Use shared function for replacing instruction variables
 // (imported as sharedReplaceVariables from shared-instructions.cjs)
 
@@ -817,7 +742,7 @@ const FANCITA_MENU_TOOL = {
     type: 'object',
     properties: {
       query: { type: 'string', description: 'Search term for menu items (e.g. "pizza", "carpaccio", "morski sadeži")' },
-      language: { type: 'string', description: 'Language code (hr, sl, en, de, it, nl)', default: 'hr' },
+      language: { type: 'string', description: 'Language code (check SUPPORTED_LANGUAGES configuration)', default: 'hr' },
       get_full_menu: { type: 'boolean', description: 'Return complete menu in specified language', default: false }
     },
     required: ['language']
@@ -831,7 +756,7 @@ const FANCITA_LANGUAGE_TOOL = {
   parameters: {
     type: 'object',
     properties: {
-      language_code: { type: 'string', description: 'Language code to switch to (hr, sl, en, de, it, nl)' },
+      language_code: { type: 'string', description: 'Language code to switch to (check SUPPORTED_LANGUAGES configuration)' },
       detected_phrases: { type: 'string', description: 'Phrases that indicated the language switch' }
     },
     required: ['language_code', 'detected_phrases']

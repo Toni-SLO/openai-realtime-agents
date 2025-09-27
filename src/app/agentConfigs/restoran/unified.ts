@@ -451,17 +451,13 @@ export const unifiedRestoranAgent = new RealtimeAgent({
           const languageCode = input.language_code;
           const detectedPhrases = input.detected_phrases;
           
-          // Language names mapping
-          const languageNames = {
-            'hr': 'hrvaščina',
-            'sl': 'slovenščina', 
-            'en': 'angleščina',
-            'de': 'nemščina',
-            'it': 'italijanščina',
-            'nl': 'nizozemščina'
-          };
+          // Get language name from environment or use code as fallback
+          const languageNamesEnv = process.env.LANGUAGE_NAMES || 'hr:hrvaščina,sl:slovenščina,en:angleščina,de:nemščina,it:italijanščina,nl:nizozemščina';
+          const languageNames = Object.fromEntries(
+            languageNamesEnv.split(',').map(pair => pair.split(':'))
+          );
           
-          const languageName = languageNames[languageCode as keyof typeof languageNames] || languageCode;
+          const languageName = languageNames[languageCode] || languageCode;
           
           // Log the language switch for transcript visibility
           console.log(`[LANGUAGE SWITCH] Detected ${languageName} from phrases: "${detectedPhrases}"`);

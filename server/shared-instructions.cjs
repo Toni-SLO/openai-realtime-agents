@@ -60,6 +60,9 @@ function replaceInstructionVariables(instructions, callerId, conversationId, ses
     .replace(/\{\{session_language\}\}/g, sessionLanguage);
   
   // 2. Replace business variables from settings.js (NEW!)
+  let reservationHours = 'N/A';
+  let deliveryHours = 'N/A';
+  
   if (settings) {
     // Guest limits
     result = result.replace(/\{\{MAX_GUESTS\}\}/g, settings.guestLimits.maxGuests.toString());
@@ -72,16 +75,28 @@ function replaceInstructionVariables(instructions, callerId, conversationId, ses
     result = result.replace(/\{\{DELIVERY_END\}\}/g, settings.businessHours.delivery.endHour.toString());
     
     // Business hours - formatted ranges
-    const reservationHours = `${settings.businessHours.reservations.startHour}:00-${settings.businessHours.reservations.endHour}:00`;
-    const deliveryHours = `${settings.businessHours.delivery.startHour}:00-${settings.businessHours.delivery.endHour}:00`;
+    reservationHours = `${settings.businessHours.reservations.startHour}:00-${settings.businessHours.reservations.endHour}:00`;
+    deliveryHours = `${settings.businessHours.delivery.startHour}:00-${settings.businessHours.delivery.endHour}:00`;
     
     result = result.replace(/\{\{RESERVATION_HOURS\}\}/g, reservationHours);
     result = result.replace(/\{\{DELIVERY_HOURS\}\}/g, deliveryHours);
-    
+  }
+  
+  // 3. Replace language configuration variables from environment
+  const supportedLanguages = process.env.SUPPORTED_LANGUAGES || 'hr,sl,en,de,it,nl';
+  const languageNames = process.env.LANGUAGE_NAMES || 'hr:hrvaščina,sl:slovenščina,en:angleščina,de:nemščina,it:italijanščina,nl:nizozemščina';
+  
+  result = result.replace(/\{\{SUPPORTED_LANGUAGES\}\}/g, supportedLanguages);
+  result = result.replace(/\{\{LANGUAGE_NAMES\}\}/g, languageNames);
+  
+  // Log dynamic variables (only if settings exist)
+  if (settings) {
     console.log('[shared-instructions] 🔄 Dynamic variables replaced:', {
       maxGuests: settings.guestLimits.maxGuests,
       reservationHours,
-      deliveryHours
+      deliveryHours,
+      supportedLanguages,
+      languageNames
     });
   }
   

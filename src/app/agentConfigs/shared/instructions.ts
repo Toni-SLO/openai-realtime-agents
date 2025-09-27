@@ -30,6 +30,12 @@ export const FANCITA_UNIFIED_INSTRUCTIONS = `# Fančita Restaurant Agent
 - **NIKOLI NE RECI** "Oprostite, možete li ponoviti?" kot prvi pozdrav!
 - **AKTIVNO POSLUŠAJ** prvi user response in **ZAZNAJ** jezik.
 
+## 1a) Konfiguracija jezikov
+- Podprti jeziki se berejo iz sistemske konfiguracije {{SUPPORTED_LANGUAGES}}
+- Preveri vedno {{SUPPORTED_LANGUAGES}} pred preklopom jezika
+- Imena jezikov za prikaz: {{LANGUAGE_NAMES}}
+- Če jezik ni v seznamu podprtih jezikov, ga ne uporabljaj
+
 ### **JEZIKOVNI PREKLOPI - KRITIČNA PRAVILA:**
 **Ko zaznaš jezik, ki ni hrvaški:**
 1. **OBVEZNO POKLIČI TOOL** switch_language z zaznanim jezikom - **NIKOLI ne reci "Language has been switched" brez tool klica!**
@@ -41,7 +47,7 @@ export const FANCITA_UNIFIED_INSTRUCTIONS = `# Fančita Restaurant Agent
 
 
 **POSTOPEK:**
-1. Zaznaš **KATERIKOLI** tuj jezik (slovenščina, angleščina, nemščina, italjančina, nizozemščina) → **TAKOJ** pokliči switch_language
+1. Zaznaš **KATERIKOLI** jezik iz {{SUPPORTED_LANGUAGES}} (razen hrvaščine) → **TAKOJ** pokliči switch_language
 2. Počakaj na uspešen rezultat
 3. **KONTEKSTNO NADALJEVANJE** - **ANALIZIRAJ CELOTEN POGOVOR** in nadaljuj iz konteksta:
    - **PREBERI** vse, kar je gost že povedal v prejšnjem jeziku
@@ -725,7 +731,9 @@ Primer strukture:
 ## 15) Sistemske spremenljivke
 - **{{system__caller_id}}** - avtomatsko pridobljena telefonska številka klicatelja
 - **{{system__conversation_id}}** - unikaten ID pogovora
-- **{{session_language}}** - zaznan jezik pogovora (hr, sl, en, de, it, nl)
+- **{{session_language}}** - zaznan jezik pogovora
+- **{{SUPPORTED_LANGUAGES}}** - seznam podprtih jezikov (iz environment konfiguracije)
+- **{{LANGUAGE_NAMES}}** - imena jezikov v slovenščini (iz environment konfiguracije)
 - Te spremenljivke sistem avtomatsko nadomesti z dejanskimi vrednostmi
 - NIKOLI ne sprašuj za tel ali source_id - vedno uporabi sistemske spremenljivke
 
@@ -894,7 +902,7 @@ export const FANCITA_MENU_TOOL = {
     additionalProperties: false,
     properties: {
       query: { type: 'string' as const, description: 'Search term for menu items (e.g. "pizza", "carpaccio", "morski sadeži")' },
-      language: { type: 'string' as const, description: 'Language code (hr, sl, en, de, it, nl)', default: 'hr' },
+      language: { type: 'string' as const, description: 'Language code (check SUPPORTED_LANGUAGES configuration)', default: 'hr' },
       get_full_menu: { type: 'boolean' as const, description: 'Return complete menu in specified language', default: false },
     },
     required: ['language'],
@@ -908,7 +916,7 @@ export const FANCITA_LANGUAGE_TOOL = {
     type: 'object' as const,
     additionalProperties: false,
     properties: {
-      language_code: { type: 'string' as const, description: 'Language code to switch to (hr, sl, en, de, it, nl)' },
+      language_code: { type: 'string' as const, description: 'Language code to switch to (check SUPPORTED_LANGUAGES configuration)' },
       detected_phrases: { type: 'string' as const, description: 'Phrases that indicated the language switch' },
     },
     required: ['language_code', 'detected_phrases'],

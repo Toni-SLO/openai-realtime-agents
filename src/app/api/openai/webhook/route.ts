@@ -11,11 +11,11 @@ import { NextResponse } from 'next/server';
 const acceptedCallIds = new Set<string>();
 
 // Track detected language per call for dynamic transcription
-const callLanguages = new Map<string, string>(); // callId -> language code (hr, sl, en, de, it, nl)
+const callLanguages = new Map<string, string>(); // callId -> language code
 
 // Function to update transcription language dynamically
 function updateTranscriptionLanguage(ws: any, callId: string, newLanguage: string) {
-  const validLanguages = ['hr', 'sl', 'en', 'de', 'it', 'nl'];
+  const validLanguages = (process.env.SUPPORTED_LANGUAGES || 'hr,sl,en,de,it,nl').split(',');
   if (!validLanguages.includes(newLanguage)) return;
   
   const currentLang = callLanguages.get(callId);

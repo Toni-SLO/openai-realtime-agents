@@ -1315,7 +1315,7 @@ export const FANCITA_MENU: MenuCategory[] = [
 // Helper functions for agent usage
 export function getMenuForAgent(language: string): string {
   const lang = language.toLowerCase();
-  const supportedLangs = ['hr', 'sl', 'en', 'de', 'it', 'nl'];
+  const supportedLangs = (process.env.SUPPORTED_LANGUAGES || 'hr,sl,en,de,it,nl').split(',');
   const targetLang = supportedLangs.includes(lang) ? lang : 'hr';
   
   let menuText = '';
@@ -1334,7 +1334,7 @@ export function getMenuForAgent(language: string): string {
 
 export function findMenuItem(searchTerm: string, language: string = 'hr'): MenuItem[] {
   const lang = language.toLowerCase();
-  const supportedLangs = ['hr', 'sl', 'en', 'de', 'it', 'nl'];
+  const supportedLangs = (process.env.SUPPORTED_LANGUAGES || 'hr,sl,en,de,it,nl').split(',');
   const targetLang = supportedLangs.includes(lang) ? lang : 'hr';
   const searchLower = searchTerm.toLowerCase();
   
