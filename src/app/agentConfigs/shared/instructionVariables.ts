@@ -119,24 +119,8 @@ export async function replaceInstructionVariables(instructionText: string): Prom
 // Sinhronska verzija za backward compatibility (uporablja cache)
 export function replaceInstructionVariablesSync(instructionText: string): string {
   if (!cachedSettings) {
-    console.warn('Settings not cached yet, trying to load synchronously...');
-    // Poskusi naložiti settings sinhronsko
-    try {
-      const path = require('path');
-      const { pathToFileURL } = require('url');
-      const cwd = process.cwd();
-      const settingsPath = path.join(cwd, 'server', 'settings.json');
-      const settings = require(settingsPath);
-      cachedSettings = settings;
-      console.log('✅ Settings loaded synchronously:', Object.keys(settings));
-    } catch (error) {
-      console.warn('⚠️ Failed to load settings synchronously, using fallback values:', error.message);
-    }
-  }
-  
-  if (!cachedSettings) {
     console.warn('Settings not cached yet, using fallback values');
-    // Uporabi fallback vrednosti
+    // Uporabi fallback vrednosti - cache se bo inicializiral asinhrono
     const fallbackSettings = {
       guestLimits: { maxGuests: 10, minGuests: 1 },
       businessHours: {

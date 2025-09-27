@@ -37,6 +37,36 @@ const PORT = parseInt(process.env.SIP_WEBHOOK_PORT || '3003', 10);
 global.callIDtoConferenceNameMapping = global.callIDtoConferenceNameMapping || {};
 global.ConferenceNametoCallerIDMapping = global.ConferenceNametoCallerIDMapping || {};
 global.ConferenceNametoCallTokenMapping = global.ConferenceNametoCallTokenMapping || {};
+global.activeResponses = global.activeResponses || new Map(); // Track active responses per call
+
+// Helper function to safely send response.create
+function safeResponseCreate(ws, callId, context = 'unknown') {
+  if (!global.activeResponses.has(callId)) {
+    global.activeResponses.set(callId, false);
+  }
+  
+  if (global.activeResponses.get(callId)) {
+    console.log(`[sip-webhook] ⚠️ Skipping response.create for ${callId} - response already active (${context})`);
+    return false;
+  }
+  
+  console.log(`[sip-webhook] 🎤 Sending response.create for ${callId} (${context})`);
+  global.activeResponses.set(callId, true);
+  
+  ws.send(JSON.stringify({
+    type: 'response.create'
+  }));
+  
+  // Reset flag after a reasonable timeout (response should complete within 30s)
+  setTimeout(() => {
+    if (global.activeResponses.has(callId)) {
+      global.activeResponses.set(callId, false);
+      console.log(`[sip-webhook] 🔄 Reset response flag for ${callId} after timeout`);
+    }
+  }, 30000);
+  
+  return true;
+}
 
 // Email konfiguracija za urgentna obvestila
 const URGENT_ERROR_EMAIL = process.env.URGENT_ERROR_EMAIL;
@@ -1454,9 +1484,7 @@ async function processCall(callId, event, callerFrom, callerPhone) {
         console.log('[sip-webhook] 🎧 Audio format configured');
         
         // Takoj pošljemo response.create za začetni pozdrav
-        ws.send(JSON.stringify({
-          "type": "response.create"
-        }));
+        safeResponseCreate(ws, callId, 'initial_greeting');
         
         console.log('[sip-webhook] 🎤 Initial response triggered');
         
@@ -1641,6 +1669,12 @@ async function processCall(callId, event, callerFrom, callerPhone) {
             } catch (e) {
               console.warn('[sip-webhook] ⚠️ Failed to buffer function args delta:', e);
             }
+          } else if (message.type === 'response.done') {
+            // Response completed - reset active response flag
+            if (global.activeResponses && global.activeResponses.has(callId)) {
+              global.activeResponses.set(callId, false);
+              console.log(`[sip-webhook] ✅ Response completed for ${callId} - flag reset`);
+            }
           } else if (message.type === 'response.function_call_arguments.done') {
             // Tool call completed - track it as pending
             let parsedArgs;
@@ -1818,6 +1852,11 @@ async function processCall(callId, event, callerFrom, callerPhone) {
         // Remove from active sessions
         if (global.activeSessions) {
           global.activeSessions.delete(callId);
+        }
+        
+        // Cleanup active response tracking
+        if (global.activeResponses) {
+          global.activeResponses.delete(callId);
         }
         
         // Check if this was a staff transfer - if so, redirect guest to conference
@@ -2549,6 +2588,10 @@ async function handleToolCall(ws, message, callerPhone, callId) {
             output: outputString
           }
         }));
+        
+        // Pošljemo response.create da Maja nadaljuje govoriti po validation napaki
+        safeResponseCreate(ws, callId, 'validation_error');
+        
         return; // Stop processing - do not call MCP
       }
       
@@ -2734,7 +2777,7 @@ async function handleToolCall(ws, message, callerPhone, callId) {
           if (global.activeWebSockets && global.activeWebSockets.has(callId)) {
             const ws = global.activeWebSockets.get(callId);
             ws.send(JSON.stringify(keepTalkingMessage));
-            ws.send(JSON.stringify({ type: 'response.create' }));
+            safeResponseCreate(ws, callId, 'staff_transfer');
           }
           
           // Don't hang up - keep guest connected
@@ -2803,8 +2846,8 @@ async function handleToolCall(ws, message, callerPhone, callId) {
     // OPOMBA: session.update po tool klicu odstranjen, ker povzroča "Cannot update voice" napake
     // Transkripcijski jezik se avtomatsko posodobi preko switch_language tool-a
     
-    // OPOMBA: response.create odstranjen, ker povzroča "active response in progress" napake
-    // OpenAI Realtime API avtomatsko nadaljuje conversation po tool rezultatu
+    // Pošljemo response.create da Maja nadaljuje govoriti po tool klicu
+    safeResponseCreate(ws, callId, 'tool_result');
     
     console.log(`[sip-webhook] 🔧 Tool result sent: ${message.call_id} (${result?.success ? 'success' : 'failed'})`);
 
@@ -2828,6 +2871,9 @@ async function handleToolCall(ws, message, callerPhone, callId) {
         output: errorOutput
       }
     }));
+    
+    // Pošljemo response.create tudi pri napakah da Maja nadaljuje govoriti
+    safeResponseCreate(ws, callId, 'tool_error');
   }
 }
 
