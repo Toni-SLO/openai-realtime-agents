@@ -11,45 +11,20 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     console.log('[menu-search] Request:', { query, language, get_full_menu });
 
-    if (get_full_menu) {
-      // Return complete menu
-      const fullMenu = getMenuForAgent(language);
+    // ALWAYS return complete menu - optimized strategy
+    const fullMenu = getMenuForAgent(language);
+    
+    if (query) {
+      console.log('[menu-search] Returning full menu with query context:', query, 'for language:', language);
+      return res.status(200).json({ 
+        success: true, 
+        data: `CELOTEN MENI ZA JEZIK: ${language.toUpperCase()}\n(Kontekst vprašanja: "${query}")\n\n${fullMenu}`
+      });
+    } else {
       console.log('[menu-search] Returning full menu for language:', language);
       return res.status(200).json({ 
         success: true, 
-        data: fullMenu 
-      });
-    } else if (query) {
-      // Search for specific items
-      const searchResults = findMenuItem(query, language);
-      
-      if (searchResults.length === 0) {
-        const errorMessage = `Ni najdenih rezultatov za "${query}". Poskusite z drugimi izrazi.`;
-        console.log('[menu-search] No results for query:', query);
-        return res.status(200).json({ 
-          success: true, 
-          data: errorMessage 
-        });
-      }
-      
-      let resultText = `Rezultati iskanja za "${query}":\n\n`;
-      searchResults.forEach(item => {
-        const translation = item.translations[language as keyof typeof item.translations];
-        resultText += `• ${translation} - ${item.price.toFixed(2)} €\n`;
-      });
-      
-      console.log('[menu-search] Found', searchResults.length, 'results for query:', query);
-      return res.status(200).json({ 
-        success: true, 
-        data: resultText 
-      });
-    } else {
-      // No query provided, return basic menu
-      const basicMenu = getMenuForAgent(language);
-      console.log('[menu-search] Returning basic menu for language:', language);
-      return res.status(200).json({ 
-        success: true, 
-        data: basicMenu 
+        data: `CELOTEN MENI ZA JEZIK: ${language.toUpperCase()}\n\n${fullMenu}`
       });
     }
   } catch (error) {

@@ -451,8 +451,15 @@ export const unifiedRestoranAgent = new RealtimeAgent({
           const languageCode = input.language_code;
           const detectedPhrases = input.detected_phrases;
           
+          // CRITICAL: Check if language is supported
+          const supportedLanguages = (process.env.SUPPORTED_LANGUAGES || 'hr,en,de,it,nl').split(',');
+          if (!supportedLanguages.includes(languageCode)) {
+            console.log(`[unified-agent] 🚫 Language ${languageCode} NOT SUPPORTED. Supported: ${supportedLanguages.join(', ')}`);
+            return `🚫 JEZIK ${languageCode.toUpperCase()} NI PODPRT\n📝 Zaznane fraze: "${detectedPhrases}"\n✅ Ostajam v hrvaščini\n🔧 Podprti jeziki: ${supportedLanguages.join(', ')}`;
+          }
+          
           // Get language name from environment or use code as fallback
-          const languageNamesEnv = process.env.LANGUAGE_NAMES || 'hr:hrvaščina,sl:slovenščina,en:angleščina,de:nemščina,it:italijanščina,nl:nizozemščina';
+          const languageNamesEnv = process.env.LANGUAGE_NAMES || 'hr:hrvaščina,en:angleščina,de:nemščina,it:italijanščina,nl:nizozemščina';
           const languageNames = Object.fromEntries(
             languageNamesEnv.split(',').map(pair => pair.split(':'))
           );

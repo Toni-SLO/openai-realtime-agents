@@ -48,7 +48,7 @@ function extractInstruction(constantName) {
 }
 
 // Helper function to replace ALL instruction variables (system + business)
-function replaceInstructionVariables(instructions, callerId, conversationId, sessionLanguage = 'hr') {
+async function replaceInstructionVariables(instructions, callerId, conversationId, sessionLanguage = 'hr') {
   if (!instructions) return '';
   
   let result = instructions;
@@ -89,6 +89,10 @@ function replaceInstructionVariables(instructions, callerId, conversationId, ses
   result = result.replace(/\{\{SUPPORTED_LANGUAGES\}\}/g, supportedLanguages);
   result = result.replace(/\{\{LANGUAGE_NAMES\}\}/g, languageNames);
   
+  // 4. Remove full menu JSON - using search_menu tool for optimization
+  result = result.replace(/\{\{FULL_MENU_JSON\}\}/g, '**MENI JE NA VOLJO PREKO search_menu TOOL-A**\n\nZa cene in jedi pokliči search_menu(query, language) ko potrebuješ:\n- search_menu("pizza", "hr") za vse pizze\n- search_menu("margherita", "hr") za specifično pizzo\n- search_menu("", "hr") za celoten meni');
+  console.log(`[shared-instructions] ✅ Menu optimization: Using search_menu tool instead of full menu`);
+  
   // Log dynamic variables (only if settings exist)
   if (settings) {
     console.log('[shared-instructions] 🔄 Dynamic variables replaced:', {
@@ -96,7 +100,9 @@ function replaceInstructionVariables(instructions, callerId, conversationId, ses
       reservationHours,
       deliveryHours,
       supportedLanguages,
-      languageNames
+      languageNames,
+      menuLanguage: sessionLanguage,
+      menuIncluded: result.includes('FULL_MENU_JSON') ? 'NO' : 'YES'
     });
   }
   

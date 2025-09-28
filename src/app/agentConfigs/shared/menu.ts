@@ -1325,7 +1325,7 @@ export function getMenuForAgent(language: string): string {
     
     category.items.forEach(item => {
       const translation = item.translations[targetLang as keyof typeof item.translations];
-      menuText += `- ${translation} - ${item.price.toFixed(2)} €\n`;
+      menuText += `- ${translation} - ${Math.round(item.price)}€\n`;
     });
   });
   

@@ -146,10 +146,14 @@ console.log(`[sip-webhook] 📞 Twilio Account: ${process.env.TWILIO_ACCOUNT_SID
 console.log(`[sip-webhook] 📞 Twilio Auth: ${process.env.TWILIO_AUTH_TOKEN ? 'SET' : 'NOT SET'}`);
 console.log(`[sip-webhook] 📞 Twilio Phone: ${process.env.TWILIO_PHONE_NUMBER ? 'SET' : 'NOT SET'}`);
 
+console.log('[sip-webhook] 🔄 Continuing with initialization...');
 const VOICE = process.env.OPENAI_REALTIME_VOICE || 'marin';
+console.log('[sip-webhook] 🔄 Voice set to:', VOICE);
 // Use G.711 μ-law for guaranteed SIP compatibility
 const SIP_CODEC = process.env.SIP_AUDIO_CODEC || 'g711_ulaw';
+console.log('[sip-webhook] 🔄 SIP codec set to:', SIP_CODEC);
 
+console.log('[sip-webhook] 🔄 Initializing data structures...');
 // Deduplicate accepts per call_id within this process
 const acceptedCallIds = new Set();
 
@@ -162,9 +166,10 @@ const callLanguages = new Map(); // callId -> language code
 // Track pending tool results to prevent premature hangup
 const pendingToolResults = new Map(); // callId -> Set of pending tool call IDs
 
+console.log('[sip-webhook] 🔄 Defining functions...');
 // Function to update transcription language dynamically
 function updateTranscriptionLanguage(ws, callId, newLanguage) {
-  const validLanguages = (process.env.SUPPORTED_LANGUAGES || 'hr,sl,en,de,it,nl').split(',');
+  const validLanguages = (process.env.SUPPORTED_LANGUAGES || 'hr,en,de,it,nl').split(',');
   if (!validLanguages.includes(newLanguage)) return;
   
   const currentLang = callLanguages.get(callId);
@@ -192,13 +197,15 @@ function updateTranscriptionLanguage(ws, callId, newLanguage) {
   console.log(`[sip-webhook] 🌍 Language detected and logged: ${newLanguage}`);
 }
 
+console.log('[sip-webhook] 🔄 updateTranscriptionLanguage function defined');
 // DISABLED: Language detection based on transcript is unreliable
 // Only agent (Maja) should decide language changes based on conversation context
 function detectUserLanguage_DISABLED(ws, callId, userTranscript) {
   // This function is completely disabled - language detection is handled by agent
   console.log(`[sip-webhook] Language detection disabled - agent handles language switching via instructions`);
   return; // Exit early - no pattern matching needed
-  
+}
+
 // Use shared function for replacing instruction variables
 // (imported as sharedReplaceVariables from shared-instructions.cjs)
 
@@ -283,7 +290,11 @@ function sendToTranscriptBridge(sessionId, event) {
 }
 
 // Initialize bridge connection
-connectToBridge();
+console.log('[sip-webhook] 🌉 Initializing bridge connection...');
+setTimeout(() => {
+  connectToBridge();
+}, 100);
+console.log('[sip-webhook] 🌉 Bridge initialization scheduled, starting server...');
 
 // Staff transfer functionality using direct Twilio call (no conference)
 async function createStaffConference(callId, guestPhone, staffPhone, problemSummary) {
@@ -1231,7 +1242,7 @@ const server = http.createServer(async (req, res) => {
       // Accept the call first
       const acceptUrl = `https://api.openai.com/v1/realtime/calls/${encodeURIComponent(callId)}/accept`;
       const sharedInstructions = FANCITA_UNIFIED_INSTRUCTIONS();
-      const baseInstructions = sharedReplaceVariables(sharedInstructions, callerFrom, callId);
+      const baseInstructions = await sharedReplaceVariables(sharedInstructions, callerFrom, callId, 'hr');
       const nowSl = new Date(new Date().toLocaleString('en-US', { timeZone: 'Europe/Ljubljana' }));
       const nowStr = nowSl.toLocaleString('sl-SI', { timeZone: 'Europe/Ljubljana' });
       const instructions = `${baseInstructions}\n\n[Timezone] Vedno uporabljaj Europe/Ljubljana. Trenutni datum in čas v Sloveniji: ${nowStr}.`;
@@ -1348,7 +1359,7 @@ async function processCall(callId, event, callerFrom, callerPhone) {
       ws.close();
     }, 10000);
 
-      ws.on('open', () => {
+      ws.on('open', async () => {
         clearTimeout(connectionTimeout); // Clear the timeout
         console.log('\n\n[SIP-WEBHOOK] ✅✅✅ WEBSOCKET CONNECTED:', callId, '✅✅✅\n');
         
@@ -1383,10 +1394,19 @@ async function processCall(callId, event, callerFrom, callerPhone) {
           }
         });
 
-        // GA VERZIJA: Nova struktura za SIP transkripcije
+        // GA VERZIJA: Nova struktura za SIP transkripcije z navodili
+        const sharedInstructions = FANCITA_UNIFIED_INSTRUCTIONS();
+        const baseInstructions = await sharedReplaceVariables(sharedInstructions, callerPhone, callId, 'hr');
+        const nowSl = new Date(new Date().toLocaleString('en-US', { timeZone: 'Europe/Ljubljana' }));
+        const nowStr = nowSl.toLocaleString('sl-SI', { timeZone: 'Europe/Ljubljana' });
+        const instructions = `${baseInstructions}\n\n[Timezone] Vedno uporabljaj Europe/Ljubljana. Trenutni datum in čas v Sloveniji: ${nowStr}.`;
+        
+        console.log(`[sip-webhook] 📋 WebSocket instructions: ${instructions.length} chars, Croatian greeting: ${instructions.includes('Restoran Fančita, Maja kod telefona')}`);
+        
         ws.send(JSON.stringify({
           type: 'session.update',
           session: {
+            instructions: instructions,  // ✅ DODANA NAVODILA
             type: 'realtime',
             model: 'gpt-realtime',
             audio: {
@@ -1966,17 +1986,28 @@ async function handleToolCall(ws, message, callerPhone, callId) {
       const languageCode = args.language_code;
       const detectedPhrases = args.detected_phrases;
       
+      // LOG LANGUAGE SWITCH TO TRANSCRIPT
+      logTranscriptEvent(callId, {
+        type: 'tool_call',
+        role: 'assistant',
+        content: `🔧 SWITCH_LANGUAGE TOOL CALLED\n📝 Detected phrases: "${detectedPhrases}"\n🌍 Target language: ${languageCode.toUpperCase()}\n⚠️ REASON: Maja thinks user switched to different language`,
+        timestamp: new Date().toISOString(),
+        metadata: {
+          toolName: 'switch_language',
+          languageCode: languageCode,
+          detectedPhrases: detectedPhrases,
+          previousLanguage: callLanguages.get(callId) || 'hr'
+        }
+      });
+      
       // Update call language
       callLanguages.set(callId, languageCode);
       
-      const languageNames = {
-        'hr': 'hrvaščina',
-        'sl': 'slovenščina', 
-        'en': 'angleščina',
-        'de': 'nemščina',
-        'it': 'italijanščina',
-        'nl': 'nizozemščina'
-      };
+      // Get language names from environment or use fallback
+      const languageNamesEnv = process.env.LANGUAGE_NAMES || 'hr:hrvaščina,en:angleščina,de:nemščina,it:italijanščina,nl:nizozemščina';
+      const languageNames = Object.fromEntries(
+        languageNamesEnv.split(',').map(pair => pair.split(':'))
+      );
       
       const languageName = languageNames[languageCode] || languageCode;
       
@@ -2802,19 +2833,6 @@ async function handleToolCall(ws, message, callerPhone, callId) {
   }
 }
 
-
-server.listen(PORT, () => {
-  console.log(`[sip-webhook] 🚀 Pure Node.js SIP webhook server listening on port ${PORT}`);
-  console.log(`[sip-webhook] 🔗 Configure Twilio webhook to: http://your-domain:${PORT}/webhook`);
-  console.log(`[sip-webhook] 📞 Staff transfer endpoints available (hybrid conference mode):`);
-  console.log(`[sip-webhook]   - /staff-callback-twiml (staff callback with summary)`);
-  console.log(`[sip-webhook]   - /staff-ready (staff keypress handler)`);
-  console.log(`[sip-webhook]   - /staff-callback-status (staff call status)`);
-  console.log(`[sip-webhook]   - /guest-conference-twiml (guest redirect to conference)`);
-  console.log(`[sip-webhook]   - /call-status (call status callbacks)`);
-  console.log(`[sip-webhook]   - /conference-events (conference participant events)`);
-});
-
 // Call guest to join conference after staff is ready
 async function callGuestToConference(callId, conferenceName) {
   console.log(`[sip-webhook] 📞 Calling guest to join conference: ${conferenceName}`);
@@ -2870,3 +2888,15 @@ async function callGuestToConference(callId, conferenceName) {
     console.error(`[sip-webhook] ❌ Error calling guest to conference: ${error.message}`);
   }
 }
+
+server.listen(PORT, () => {
+  console.log(`[sip-webhook] 🚀 Pure Node.js SIP webhook server listening on port ${PORT}`);
+  console.log(`[sip-webhook] 🔗 Configure Twilio webhook to: http://your-domain:${PORT}/webhook`);
+  console.log(`[sip-webhook] 📞 Staff transfer endpoints available (hybrid conference mode):`);
+  console.log(`[sip-webhook]   - /staff-callback-twiml (staff callback with summary)`);
+  console.log(`[sip-webhook]   - /staff-ready (staff keypress handler)`);
+  console.log(`[sip-webhook]   - /staff-callback-status (staff call status)`);
+  console.log(`[sip-webhook]   - /guest-conference-twiml (guest redirect to conference)`);
+  console.log(`[sip-webhook]   - /call-status (call status callbacks)`);
+  console.log(`[sip-webhook]   - /conference-events (conference participant events)`);
+});
