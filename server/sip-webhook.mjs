@@ -1980,13 +1980,72 @@ async function handleToolCall(ws, message, callerPhone, callId) {
         const basicMenu = await getFullMenu(language);
         result = { success: true, data: basicMenu };
       }
+      
+      // LOG SEARCH_MENU TO TRANSCRIPT
+      logTranscriptEvent(callId, {
+        type: 'tool_call',
+        tool_name: 'search_menu',
+        arguments: args,
+        call_id: message.call_id,
+        timestamp: new Date().toISOString(),
+        metadata: {
+          toolName: 'search_menu',
+          callId: message.call_id,
+          language: language,
+          query: args.query || 'full_menu',
+          get_full_menu: args.get_full_menu || false
+        }
+      });
+      
     } else if (message.name === 'switch_language') {
       console.log('[sip-webhook] 🔧 Handling switch_language tool');
       const args = JSON.parse(message.arguments);
       const languageCode = args.language_code;
       const detectedPhrases = args.detected_phrases;
+      const currentLanguage = callLanguages.get(callId) || 'hr';
       
-      // LOG LANGUAGE SWITCH TO TRANSCRIPT
+      // CRITICAL: Check if language is supported
+      const supportedLanguages = (process.env.SUPPORTED_LANGUAGES || 'hr,en,de,it,nl').split(',');
+      if (!supportedLanguages.includes(languageCode)) {
+        console.log(`[sip-webhook] 🚫 Language ${languageCode} NOT SUPPORTED. Supported: ${supportedLanguages.join(', ')}`);
+        
+        logTranscriptEvent(callId, {
+          type: 'tool_call',
+          role: 'assistant',
+          content: `🚫 LANGUAGE SWITCH BLOCKED\n📝 Detected phrases: "${detectedPhrases}"\n🌍 Target language: ${languageCode.toUpperCase()}\n❌ REASON: Language ${languageCode.toUpperCase()} not supported`,
+          timestamp: new Date().toISOString(),
+          metadata: {
+            toolName: 'switch_language',
+            languageCode: languageCode,
+            detectedPhrases: detectedPhrases,
+            previousLanguage: currentLanguage,
+            blocked: true,
+            reason: 'unsupported_language'
+          }
+        });
+        
+        result = `🚫 JEZIK ${languageCode.toUpperCase()} NI PODPRT\n📝 Zaznane fraze: "${detectedPhrases}"\n✅ Ostajam v hrvaščini\n🔧 Podprti jeziki: ${supportedLanguages.join(', ')}`;
+      } else if (languageCode === currentLanguage) {
+        console.log(`[sip-webhook] 🚫 BLOCKED: Already in ${languageCode.toUpperCase()}. Ignoring switch request.`);
+        
+        logTranscriptEvent(callId, {
+          type: 'tool_call',
+          role: 'assistant', 
+          content: `🚫 LANGUAGE SWITCH BLOCKED\n📝 Detected phrases: "${detectedPhrases}"\n🌍 Target language: ${languageCode.toUpperCase()}\n❌ REASON: Already in ${languageCode.toUpperCase()} - no switch needed`,
+          timestamp: new Date().toISOString(),
+          metadata: {
+            toolName: 'switch_language',
+            languageCode: languageCode,
+            detectedPhrases: detectedPhrases,
+            previousLanguage: currentLanguage,
+            blocked: true,
+            reason: 'same_language'
+          }
+        });
+        
+        result = `🚫 JEZIK ${languageCode.toUpperCase()} JE ŽE AKTIVEN\n📝 Zaznane fraze: "${detectedPhrases}"\n✅ Ostajam v ${languageCode === 'hr' ? 'hrvaščini' : languageCode}`;
+      } else {
+        // LOG LANGUAGE SWITCH TO TRANSCRIPT
       logTranscriptEvent(callId, {
         type: 'tool_call',
         role: 'assistant',
@@ -1996,7 +2055,7 @@ async function handleToolCall(ws, message, callerPhone, callId) {
           toolName: 'switch_language',
           languageCode: languageCode,
           detectedPhrases: detectedPhrases,
-          previousLanguage: callLanguages.get(callId) || 'hr'
+          previousLanguage: currentLanguage
         }
       });
       
@@ -2017,6 +2076,7 @@ async function handleToolCall(ws, message, callerPhone, callId) {
       const switchMessage = `🌍 JEZIK PREKLOPLJEN: ${languageCode.toUpperCase()} (${languageName})\n📝 Zaznane fraze: "${detectedPhrases}"\n✅ Transkripcijski model posodobljen na ${languageCode}\n🤖 NAVODILO: Nadaljuj pogovor v jeziku ${languageName} iz konteksta prejšnjega pogovora. Ne sprašuj ponovno "Kako lahko pomagam?" ampak direktno nadaljuj z ustreznim vprašanjem glede na to, kar je gost že omenil.`;
       
       result = { success: true, data: switchMessage };
+      }
     } else if (message.name === 'get_slovenian_time') {
       // Return current Slovenian time
       const now = new Date(new Date().toLocaleString('en-US', { timeZone: 'Europe/Ljubljana' }));
