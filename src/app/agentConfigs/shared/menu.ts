@@ -52,6 +52,54 @@ export const FANCITA_MENU: MenuCategory[] = [
         }
       },
       {
+        id: 'pljukanci_shrimp_zucchini',
+        price: 17.00,
+        translations: {
+          hr: 'Pljukanci s gamberi i tikvicama',
+          sl: 'Pljukanci z gamberi in bučkami',
+          en: 'Pljukanci with shrimps and zucchini',
+          de: 'Pljukanci mit Garnelen und Zucchini',
+          it: 'Pljukanci con gamberi e zucchine',
+          nl: 'Pljukanci met garnalen en courgette'
+        }
+      },
+      {
+        id: 'pljukanci_truffle_cream',
+        price: 17.00,
+        translations: {
+          hr: 'Pljukanci s tartufima i vrhnjem',
+          sl: 'Pljukanci s tartufi in smetano',
+          en: 'Pljukanci with truffle and cream',
+          de: 'Pljukanci mit Trüffel und Sahne',
+          it: 'Pljukanci con tartufo e panna',
+          nl: 'Pljukanci met truffel en room'
+        }
+      },
+      {
+        id: 'pljukanci_bolognese',
+        price: 12.00,
+        translations: {
+          hr: 'Pljukanci bolonjeze',
+          sl: 'Pljukanci bolognese',
+          en: 'Pljukanci bolognese',
+          de: 'Pljukanci nach Bologner Art',
+          it: 'Pljukanci alla bolognese',
+          nl: 'Pljukanci bolognese'
+        }
+      },
+      {
+        id: 'pljukanci_vegetables',
+        price: 12.00,
+        translations: {
+          hr: 'Pljukanci s povrćem',
+          sl: 'Pljukanci z zelenjavo',
+          en: 'Pljukanci with vegetables',
+          de: 'Pljukanci mit Gemüse',
+          it: 'Pljukanci con verdure',
+          nl: 'Pljukanci met groenten'
+        }
+      },
+      {
         id: 'carpaccio_rocket',
         price: 14.00,
         translations: {
@@ -318,6 +366,150 @@ export const FANCITA_MENU: MenuCategory[] = [
         }
       },
       {
+        id: 'spaghetti_shrimp_zucchini',
+        price: 17.00,
+        translations: {
+          hr: 'Špageti s gamberi i tikvicama',
+          sl: 'Špageti z gamberi in bučkami',
+          en: 'Spaghetti with shrimps and zucchini',
+          de: 'Spaghetti mit Garnelen und Zucchini',
+          it: 'Spaghetti con gamberi e zucchine',
+          nl: 'Spaghetti met garnalen en courgette'
+        }
+      },
+      {
+        id: 'spaghetti_shrimp_mushrooms',
+        price: 17.00,
+        translations: {
+          hr: 'Špageti s gamberi i gljivama',
+          sl: 'Špageti z gamberi in gobami',
+          en: 'Spaghetti with shrimps and mushrooms',
+          de: 'Spaghetti mit Garnelen und Pilzen',
+          it: 'Spaghetti con gamberi e funghi',
+          nl: 'Spaghetti met garnalen en paddenstoelen'
+        }
+      },
+      {
+        id: 'spaghetti_mushrooms_prosciutto_truffle',
+        price: 17.00,
+        translations: {
+          hr: 'Špageti s gljivama, pršutom, tartufima i vrhnjem',
+          sl: 'Špageti z gobami, pršutom, tartufi in smetano',
+          en: 'Spaghetti with mushrooms, prosciutto, truffle and cream',
+          de: 'Spaghetti mit Pilzen, Prosciutto, Trüffel und Sahne',
+          it: 'Spaghetti con funghi, prosciutto, tartufo e panna',
+          nl: 'Spaghetti met paddenstoelen, prosciutto, truffel en room'
+        }
+      },
+      {
+        id: 'spaghetti_truffle_cream',
+        price: 17.00,
+        translations: {
+          hr: 'Špageti s tartufima i vrhnjem',
+          sl: 'Špageti s tartufi in smetano',
+          en: 'Spaghetti with truffle and cream',
+          de: 'Spaghetti mit Trüffel und Sahne',
+          it: 'Spaghetti con tartufo e panna',
+          nl: 'Spaghetti met truffel en room'
+        }
+      },
+      {
+        id: 'spaghetti_bolognese',
+        price: 12.00,
+        translations: {
+          hr: 'Špageti bolonjeze',
+          sl: 'Špageti bolognese',
+          en: 'Spaghetti bolognese',
+          de: 'Spaghetti nach Bologner Art',
+          it: 'Spaghetti alla bolognese',
+          nl: 'Spaghetti bolognese'
+        }
+      },
+      {
+        id: 'spaghetti_vegetables',
+        price: 12.00,
+        translations: {
+          hr: 'Špageti s povrćem',
+          sl: 'Špageti z zelenjavo',
+          en: 'Spaghetti with vegetables',
+          de: 'Spaghetti mit Gemüse',
+          it: 'Spaghetti con verdure',
+          nl: 'Spaghetti met groenten'
+        }
+      },
+      {
+        id: 'gnocchi_shrimp_zucchini',
+        price: 17.00,
+        translations: {
+          hr: 'Njoki s gamberi i tikvicama',
+          sl: 'Njoki z gamberi in bučkami',
+          en: 'Gnocchi with shrimps and zucchini',
+          de: 'Gnocchi mit Garnelen und Zucchini',
+          it: 'Gnocchi con gamberi e zucchine',
+          nl: 'Gnocchi met garnalen en courgette'
+        }
+      },
+      {
+        id: 'gnocchi_shrimp_mushrooms',
+        price: 17.00,
+        translations: {
+          hr: 'Njoki s gamberi i gljivama',
+          sl: 'Njoki z gamberi in gobami',
+          en: 'Gnocchi with shrimps and mushrooms',
+          de: 'Gnocchi mit Garnelen und Pilzen',
+          it: 'Gnocchi con gamberi e funghi',
+          nl: 'Gnocchi met garnalen en paddenstoelen'
+        }
+      },
+      {
+        id: 'gnocchi_mushrooms_prosciutto_truffle',
+        price: 17.00,
+        translations: {
+          hr: 'Njoki s gljivama, pršutom, tartufima i vrhnjem',
+          sl: 'Njoki z gobami, pršutom, tartufi in smetano',
+          en: 'Gnocchi with mushrooms, prosciutto, truffle and cream',
+          de: 'Gnocchi mit Pilzen, Prosciutto, Trüffel und Sahne',
+          it: 'Gnocchi con funghi, prosciutto, tartufo e panna',
+          nl: 'Gnocchi met paddenstoelen, prosciutto, truffel en room'
+        }
+      },
+      {
+        id: 'gnocchi_truffle_cream',
+        price: 17.00,
+        translations: {
+          hr: 'Njoki s tartufima i vrhnjem',
+          sl: 'Njoki s tartufi in smetano',
+          en: 'Gnocchi with truffle and cream',
+          de: 'Gnocchi mit Trüffel und Sahne',
+          it: 'Gnocchi con tartufo e panna',
+          nl: 'Gnocchi met truffel en room'
+        }
+      },
+      {
+        id: 'gnocchi_bolognese',
+        price: 12.00,
+        translations: {
+          hr: 'Njoki bolonjeze',
+          sl: 'Njoki bolognese',
+          en: 'Gnocchi bolognese',
+          de: 'Gnocchi nach Bologner Art',
+          it: 'Gnocchi alla bolognese',
+          nl: 'Gnocchi bolognese'
+        }
+      },
+      {
+        id: 'gnocchi_vegetables',
+        price: 12.00,
+        translations: {
+          hr: 'Njoki s povrćem',
+          sl: 'Njoki z zelenjavo',
+          en: 'Gnocchi with vegetables',
+          de: 'Gnocchi mit Gemüse',
+          it: 'Gnocchi con verdure',
+          nl: 'Gnocchi met groenten'
+        }
+      },
+      {
         id: 'pasticcio',
         price: 12.00,
         translations: {
@@ -330,6 +522,78 @@ export const FANCITA_MENU: MenuCategory[] = [
         }
       },
       {
+        id: 'pasticcio_shrimp_zucchini',
+        price: 17.00,
+        translations: {
+          hr: 'Pasticcio s gamberi i tikvicama',
+          sl: 'Pasticcio z gamberi in bučkami',
+          en: 'Pasticcio with shrimps and zucchini',
+          de: 'Pasticcio mit Garnelen und Zucchini',
+          it: 'Pasticcio con gamberi e zucchine',
+          nl: 'Pasticcio met garnalen en courgette'
+        }
+      },
+      {
+        id: 'pasticcio_shrimp_mushrooms',
+        price: 17.00,
+        translations: {
+          hr: 'Pasticcio s gamberi i gljivama',
+          sl: 'Pasticcio z gamberi in gobami',
+          en: 'Pasticcio with shrimps and mushrooms',
+          de: 'Pasticcio mit Garnelen und Pilzen',
+          it: 'Pasticcio con gamberi e funghi',
+          nl: 'Pasticcio met garnalen en paddenstoelen'
+        }
+      },
+      {
+        id: 'pasticcio_mushrooms_prosciutto_truffle',
+        price: 17.00,
+        translations: {
+          hr: 'Pasticcio s gljivama, pršutom, tartufima i vrhnjem',
+          sl: 'Pasticcio z gobami, pršutom, tartufi in smetano',
+          en: 'Pasticcio with mushrooms, prosciutto, truffle and cream',
+          de: 'Pasticcio mit Pilzen, Prosciutto, Trüffel und Sahne',
+          it: 'Pasticcio con funghi, prosciutto, tartufo e panna',
+          nl: 'Pasticcio met paddenstoelen, prosciutto, truffel en room'
+        }
+      },
+      {
+        id: 'pasticcio_truffle_cream',
+        price: 17.00,
+        translations: {
+          hr: 'Pasticcio s tartufima i vrhnjem',
+          sl: 'Pasticcio s tartufi in smetano',
+          en: 'Pasticcio with truffle and cream',
+          de: 'Pasticcio mit Trüffel und Sahne',
+          it: 'Pasticcio con tartufo e panna',
+          nl: 'Pasticcio met truffel en room'
+        }
+      },
+      {
+        id: 'pasticcio_bolognese',
+        price: 12.00,
+        translations: {
+          hr: 'Pasticcio bolonjeze',
+          sl: 'Pasticcio bolognese',
+          en: 'Pasticcio bolognese',
+          de: 'Pasticcio nach Bologner Art',
+          it: 'Pasticcio alla bolognese',
+          nl: 'Pasticcio bolognese'
+        }
+      },
+      {
+        id: 'pasticcio_vegetables',
+        price: 12.00,
+        translations: {
+          hr: 'Pasticcio s povrćem',
+          sl: 'Pasticcio z zelenjavo',
+          en: 'Pasticcio with vegetables',
+          de: 'Pasticcio mit Gemüse',
+          it: 'Pasticcio con verdure',
+          nl: 'Pasticcio met groenten'
+        }
+      },
+      {
         id: 'risotto_shrimp',
         price: 17.00,
         translations: {
@@ -339,6 +603,78 @@ export const FANCITA_MENU: MenuCategory[] = [
           de: 'Risotto mit Garnelen',
           it: 'Risotto con gamberetti',
           nl: 'Risotto met garnalen'
+        }
+      },
+      {
+        id: 'risotto_shrimp_zucchini',
+        price: 17.00,
+        translations: {
+          hr: 'Rižot s gamberi i tikvicama',
+          sl: 'Rižota z gamberi in bučkami',
+          en: 'Risotto with shrimps and zucchini',
+          de: 'Risotto mit Garnelen und Zucchini',
+          it: 'Risotto con gamberetti e zucchine',
+          nl: 'Risotto met garnalen en courgette'
+        }
+      },
+      {
+        id: 'risotto_shrimp_mushrooms',
+        price: 17.00,
+        translations: {
+          hr: 'Rižot s gamberi i gljivama',
+          sl: 'Rižota z gamberi in gobami',
+          en: 'Risotto with shrimps and mushrooms',
+          de: 'Risotto mit Garnelen und Pilzen',
+          it: 'Risotto con gamberetti e funghi',
+          nl: 'Risotto met garnalen en paddenstoelen'
+        }
+      },
+      {
+        id: 'risotto_truffle_cream',
+        price: 17.00,
+        translations: {
+          hr: 'Rižot s tartufima i vrhnjem',
+          sl: 'Rižota s tartufi in smetano',
+          en: 'Risotto with truffle and cream',
+          de: 'Risotto mit Trüffel und Sahne',
+          it: 'Risotto con tartufo e panna',
+          nl: 'Risotto met truffel en room'
+        }
+      },
+      {
+        id: 'risotto_mushrooms_prosciutto_truffle',
+        price: 17.00,
+        translations: {
+          hr: 'Rižot s gljivama, pršutom, tartufima i vrhnjem',
+          sl: 'Rižota z gobami, pršutom, tartufi in smetano',
+          en: 'Risotto with mushrooms, prosciutto, truffle and cream',
+          de: 'Risotto mit Pilzen, Prosciutto, Trüffel und Sahne',
+          it: 'Risotto con funghi, prosciutto, tartufo e panna',
+          nl: 'Risotto met paddenstoelen, prosciutto, truffel en room'
+        }
+      },
+      {
+        id: 'risotto_bolognese',
+        price: 12.00,
+        translations: {
+          hr: 'Rižot bolonjeze',
+          sl: 'Rižota bolognese',
+          en: 'Bolognese risotto',
+          de: 'Risotto nach Bologner Art',
+          it: 'Risotto alla bolognese',
+          nl: 'Bolognese risotto'
+        }
+      },
+      {
+        id: 'risotto_vegetables',
+        price: 12.00,
+        translations: {
+          hr: 'Rižot s povrćem',
+          sl: 'Rižota z zelenjavo',
+          en: 'Risotto with vegetables',
+          de: 'Risotto mit Gemüse',
+          it: 'Risotto con verdure',
+          nl: 'Risotto met groenten'
         }
       },
       {

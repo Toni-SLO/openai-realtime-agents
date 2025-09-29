@@ -80,6 +80,32 @@ async function replaceInstructionVariables(instructions, callerId, conversationI
     
     result = result.replace(/\{\{RESERVATION_HOURS\}\}/g, reservationHours);
     result = result.replace(/\{\{DELIVERY_HOURS\}\}/g, deliveryHours);
+
+    // ETA rules (orders)
+    if (settings.orders && settings.orders.eta) {
+      const eta = settings.orders.eta;
+      const pickup = eta.pickup || {};
+      const delivery = eta.delivery || {};
+
+      if (pickup.count_0_5_min != null) {
+        result = result.replace(/\{\{ETA_PICKUP_0_5\}\}/g, String(pickup.count_0_5_min));
+      }
+      if (pickup.count_gt_5_min != null) {
+        result = result.replace(/\{\{ETA_PICKUP_GT_5\}\}/g, String(pickup.count_gt_5_min));
+      }
+      if (delivery.count_0_min != null) {
+        result = result.replace(/\{\{ETA_DELIVERY_0\}\}/g, String(delivery.count_0_min));
+      }
+      if (delivery.count_1_min != null) {
+        result = result.replace(/\{\{ETA_DELIVERY_1\}\}/g, String(delivery.count_1_min));
+      }
+      if (delivery.range_2_3_min != null) {
+        result = result.replace(/\{\{ETA_DELIVERY_2_3\}\}/g, String(delivery.range_2_3_min));
+      }
+      if (delivery.range_gt_3_min != null) {
+        result = result.replace(/\{\{ETA_DELIVERY_GT_3\}\}/g, String(delivery.range_gt_3_min));
+      }
+    }
   }
   
   // 3. Replace language configuration variables from environment
