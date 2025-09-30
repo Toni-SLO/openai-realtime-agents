@@ -3,12 +3,12 @@ import {
   FANCITA_UNIFIED_INSTRUCTIONS,
   FANCITA_RESERVATION_TOOL,
   FANCITA_ORDER_TOOL, 
-  FANCITA_HANDOFF_TOOL,
+  FANCITA_CALLBACK_TOOL,
   FANCITA_MENU_TOOL,
   FANCITA_LANGUAGE_TOOL,
   FANCITA_CHECK_AVAILABILITY_TOOL
 } from '../shared/instructions';
-import { getMenuForAgent, findMenuItem } from '../shared/menu';
+import { getMenuForAgent, findMenuItem, FANCITA_MENU } from '../shared/menu';
 
 // Helper function to extract clean phone number from SIP header format
 function extractCleanPhone(rawPhone: string): string {
@@ -206,6 +206,7 @@ export const unifiedRestoranAgent = new RealtimeAgent({
           const rawCallerPhone = details?.context?.system__caller_id || '{{system__caller_id}}';
           const callerPhone = extractCleanPhone(rawCallerPhone);
           const conversationId = details?.context?.system__conversation_id || '{{system__conversation_id}}';
+          const sessionLanguage = details?.context?.session_language || 'hr';
           
           // Menu items price lookup (from order.ts)
           const MENU_ITEMS: { [key: string]: number } = {
@@ -296,11 +297,11 @@ export const unifiedRestoranAgent = new RealtimeAgent({
       name: 's7355981_check_orders'
     }] : []),
 
-    // Direct MCP tool for handoff (if MCP_SERVER_URL is configured)
+    // Direct MCP tool for callback requests (if MCP_SERVER_URL is configured)
     ...(process.env.MCP_SERVER_URL ? [{
       type: 'mcp' as const,
       server_url: process.env.MCP_SERVER_URL,
-      name: 'transfer_to_staff'
+      name: 's7433629_fancita_calls_supabase'
     }] : []),
 
     // Check availability tool
@@ -576,25 +577,31 @@ export const unifiedRestoranAgent = new RealtimeAgent({
       },
     }),
 
-    // Fallback handoff tool
+    // Fallback callback request tool (staff will call back)
     tool({
-      name: FANCITA_HANDOFF_TOOL.name,
-      description: FANCITA_HANDOFF_TOOL.description,
-      parameters: FANCITA_HANDOFF_TOOL.parameters as any,
+      name: FANCITA_CALLBACK_TOOL.name,
+      description: FANCITA_CALLBACK_TOOL.description,
+      parameters: FANCITA_CALLBACK_TOOL.parameters as any,
       execute: async (input: any, details: any) => {
         try {
-          console.log('[unified-agent] Handoff tool called with:', input);
+          console.log('[unified-agent] Callback request tool called with:', input);
           
-          // Extract caller phone from context  
+          // Extract caller phone and conversation ID from context
           const rawCallerPhone = details?.context?.system__caller_id || '{{system__caller_id}}';
           const callerPhone = extractCleanPhone(rawCallerPhone);
           const conversationId = details?.context?.system__conversation_id || '{{system__conversation_id}}';
           
-          const handoffData = {
-            problem_summary: input.problem_summary,
+          // Get session language from context or default to 'hr'
+          const sessionLanguage = details?.context?.session_language || 'hr';
+          
+          const callbackData = {
+            name: input.name,
             tel: callerPhone,
-            source_id: conversationId,
+            razlog: input.razlog, // Always in Croatian
+            jezik: sessionLanguage
           };
+
+          console.log('[unified-agent] Callback data prepared:', callbackData);
 
           // Call MCP system
           const url = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
@@ -602,36 +609,50 @@ export const unifiedRestoranAgent = new RealtimeAgent({
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              action: 'transfer_to_staff',
-              data: handoffData
+              action: 's7433629_fancita_calls_supabase',
+              data: callbackData
             })
           });
 
           const result = await response.json();
-          console.log('[unified-agent] MCP handoff result:', result);
+          console.log('[unified-agent] MCP callback result:', result);
 
           if (result.success) {
             return {
+              success: true,
               content: [{
                 type: "text",
-                text: "Povezujem vas z osebjem. Trenutak..."
+                text: "Zahtjev za povratni klic je uspješno zaprimljen."
               }]
             };
           } else {
-            throw new Error(result.error || 'Handoff failed');
+            throw new Error(result.error || 'Callback request failed');
           }
         } catch (error) {
-          console.error('[unified-agent] Handoff failed:', error);
+          console.error('[unified-agent] Callback request failed:', error);
           return { 
             success: false, 
             error: error instanceof Error ? error.message : String(error),
             content: [{
               type: "text",
-              text: "Oprostite, trenutno ne morem povezati z osebjem. Poskusite direktno poklicati restavracijo."
+              text: "Oprostite, trenutno ne morem zabilježiti zahtjev za povratni klic. Pokušajte kasnije ili direktno nazovite restoran."
             }]
           };
         }
       },
     })
+
+    // OLD: Direct phone transfer tool - DEPRECATED, keeping for reference
+    // ...(process.env.MCP_SERVER_URL ? [{
+    //   type: 'mcp' as const,
+    //   server_url: process.env.MCP_SERVER_URL,
+    //   name: 'transfer_to_staff'
+    // }] : []),
+    // tool({
+    //   name: 'transfer_to_staff',
+    //   description: 'Transfer the call to restaurant staff with problem summary',
+    //   parameters: { ... },
+    //   execute: async (input: any, details: any) => { ... }
+    // })
   ]
 });

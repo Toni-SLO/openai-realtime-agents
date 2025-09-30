@@ -394,6 +394,7 @@ async function handleOrderTool(ws: any, functionCallId: string, args: string, ca
   try {
     console.log('[openai-webhook] Executing order tool with args:', args);
     const params = JSON.parse(args);
+    const sessionLanguage = (params && params.session_language) || 'hr';
     
     // callerPhone is already clean from the main handler
     const cleanPhone = callerPhone;
@@ -417,6 +418,30 @@ async function handleOrderTool(ws: any, functionCallId: string, args: string, ca
       type: 'response.create'
     }));
     
+    // If session language is English, convert item names to bilingual HR (EN)
+    let items = params.items;
+    try {
+      if (sessionLanguage === 'en' && Array.isArray(items)) {
+        const { FANCITA_MENU } = await import('../../../agentConfigs/shared/menu');
+        const allMenuItems = FANCITA_MENU.flatMap((cat: any) => cat.items);
+        const normalize = (s: string) => (s || '').toLowerCase().trim();
+        const toBilingual = (name: string) => {
+          const target = normalize(name);
+          const match = allMenuItems.find((mi: any) => Object.values(mi.translations).some((t: any) => normalize(t) === target));
+          if (match?.translations?.hr && match?.translations?.en) {
+            const hrName = match.translations.hr;
+            const enName = match.translations.en;
+            if (normalize(name) === normalize(`${hrName} (${enName})`)) return name;
+            return `${hrName} (${enName})`;
+          }
+          return name;
+        };
+        items = items.map((it: any) => ({ ...it, name: toBilingual(it.name) }));
+      }
+    } catch (e) {
+      console.warn('[openai-webhook] Bilingual item conversion skipped:', (e as Error).message);
+    }
+
     // Call MCP endpoint
     const mcpResponse = await fetch('http://localhost:3000/api/mcp', {
       method: 'POST',
@@ -429,7 +454,7 @@ async function handleOrderTool(ws: any, functionCallId: string, args: string, ca
           delivery_time: params.delivery_time,
           delivery_type: params.delivery_type,
           delivery_address: params.delivery_address,
-          items: params.items,
+          items,
           total: params.total,
           notes: params.notes || '—',
         tel: cleanPhone,

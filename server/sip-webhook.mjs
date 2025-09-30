@@ -715,17 +715,35 @@ const FANCITA_ORDER_TOOL = {
   }
 };
 
-const FANCITA_HANDOFF_TOOL = {
+// OLD: Direct phone transfer tool - DEPRECATED
+// const FANCITA_HANDOFF_TOOL = {
+//   type: 'function',
+//   name: 'transfer_to_staff',
+//   description: 'Transfer call to restaurant staff',
+//   parameters: {
+//     type: 'object',
+//     properties: {
+//       problem_summary: { type: 'string', description: 'Summary of the guest problem' },
+//       guest_number: { type: 'string', description: 'Guest phone number' }
+//     },
+//     required: ['guest_number', 'problem_summary']
+//   }
+// };
+
+// NEW: Callback request tool (staff will call guest back)
+const FANCITA_CALLBACK_TOOL = {
   type: 'function',
-  name: 'transfer_to_staff',
-  description: 'Transfer call to restaurant staff',
+  name: 's7433629_fancita_calls_supabase',
+  description: 'Create a callback request when guest needs staff assistance',
   parameters: {
     type: 'object',
     properties: {
-      problem_summary: { type: 'string', description: 'Summary of the guest problem' },
-      guest_number: { type: 'string', description: 'Guest phone number' }
+      name: { type: 'string', description: 'Guest name' },
+      tel: { type: 'string', description: 'Guest phone number (use system caller_id)' },
+      razlog: { type: 'string', description: 'Reason for callback in Croatian (e.g., "Velika skupina - 15 osoba", "Želim razgovarati s Pavlom")' },
+      jezik: { type: 'string', description: 'Guest language code (use session_language)' }
     },
-    required: ['guest_number', 'problem_summary']
+    required: ['name', 'tel', 'razlog', 'jezik']
   }
 };
 
@@ -1442,7 +1460,7 @@ async function processCall(callId, event, callerFrom, callerPhone) {
               description: 'Vrne trenutni datum/uro v Europe/Ljubljana',
               parameters: { type: 'object', properties: {} }
             },
-            FANCITA_RESERVATION_TOOL, FANCITA_ORDER_TOOL, FANCITA_HANDOFF_TOOL, FANCITA_HANGUP_TOOL, FANCITA_MENU_TOOL, FANCITA_LANGUAGE_TOOL
+            FANCITA_RESERVATION_TOOL, FANCITA_ORDER_TOOL, FANCITA_CALLBACK_TOOL, FANCITA_HANGUP_TOOL, FANCITA_MENU_TOOL, FANCITA_LANGUAGE_TOOL
           ];
           
           // Pošljemo session.update s tools po uspešni vzpostavitvi osnovne povezave
@@ -2689,77 +2707,114 @@ async function handleToolCall(ws, message, callerPhone, callId) {
           };
         }
       }
-    } else if (message.name === 'transfer_to_staff') {
-      // Real staff handoff - call staff and create conference
+    } else if (message.name === 's7433629_fancita_calls_supabase') {
+      // NEW: Callback request - staff will call guest back
       const args = JSON.parse(message.arguments);
-      const staffPhone = process.env.STAFF_PHONE_NUMBER;
+      console.log('[sip-webhook] 🔧 Handling s7433629_fancita_calls_supabase tool');
+      console.log('[sip-webhook] 🔧 DEBUG Original args:', JSON.stringify(args, null, 2));
       
-      console.log(`[sip-webhook] 🔧 DEBUG: Staff transfer requested`);
-      console.log(`[sip-webhook] 🔧 DEBUG: STAFF_PHONE_NUMBER = ${staffPhone || 'NOT SET'}`);
-      console.log(`[sip-webhook] 🔧 DEBUG: TWILIO_ACCOUNT_SID = ${process.env.TWILIO_ACCOUNT_SID ? 'SET' : 'NOT SET'}`);
-      console.log(`[sip-webhook] 🔧 DEBUG: TWILIO_AUTH_TOKEN = ${process.env.TWILIO_AUTH_TOKEN ? 'SET' : 'NOT SET'}`);
-      console.log(`[sip-webhook] 🔧 DEBUG: TWILIO_PHONE_NUMBER = ${process.env.TWILIO_PHONE_NUMBER ? 'SET' : 'NOT SET'}`);
-      console.log(`[sip-webhook] 🔧 DEBUG: Problem summary = ${args.problem_summary}`);
+      // Add/fix tel (but NOT source_id - Make.com doesn't expect it for this tool)
+      if (callerPhone) {
+        if (args.tel && args.tel !== callerPhone) {
+          console.log(`[sip-webhook] 📞 Replacing tel parameter: "${args.tel}" -> "${callerPhone}"`);
+        } else if (!args.tel) {
+          console.log(`[sip-webhook] 📞 Added tel parameter: ${callerPhone}`);
+        }
+        args.tel = callerPhone;
+      }
+      // NOTE: Do NOT add source_id - Make.com scenario doesn't expect it
       
-      if (!staffPhone) {
-        console.log(`[sip-webhook] ❌ STAFF_PHONE_NUMBER not configured`);
-        result = { 
-          success: false, 
-          error: 'STAFF_PHONE_NUMBER not configured in environment' 
-        };
-      } else {
-        try {
-          console.log(`[sip-webhook] 📞 Scheduling staff callback for ${callId}`);
-          
-          // Extract guest phone from stored conference mapping
-          const conferenceName = global.callIDtoConferenceNameMapping[callId];
-          const guestPhone = global.ConferenceNametoCallerIDMapping[conferenceName] || '+38641734134';
-          
-          // Schedule staff callback (new approach - wait for staff to answer)
-          const conferenceResult = await scheduleStaffCallback(
-            callId, 
-            args.problem_summary,
-            guestPhone
-          );
-          
-          console.log(`[sip-webhook] 🔧 DEBUG: Conference result:`, conferenceResult);
-          
-          if (conferenceResult.success) {
-            result = { 
-              success: true, 
-              message: 'Staff callback scheduled successfully. You will be called back when staff is available.',
-              conference_name: conferenceResult.conference_name,
-              callback_scheduled: true
-            };
-            
-            // Log the transfer
-            logTranscriptEvent(callId, {
-              type: 'staff_transfer',
-              staff_phone: staffPhone,
-              problem_summary: args.problem_summary,
-              conference_sid: conferenceResult.conference_sid,
-              timestamp: new Date().toISOString(),
-              metadata: {
-                transferInitiated: true,
-                staffNumber: staffPhone,
-                guestNumber: callerPhone
-              }
-            });
-          } else {
-            console.log(`[sip-webhook] ❌ Conference creation failed:`, conferenceResult.error);
-            result = { 
-              success: false, 
-              error: `Staff transfer failed: ${conferenceResult.error}` 
-            };
+      console.log('[sip-webhook] 🔧 DEBUG Final args:', JSON.stringify(args, null, 2));
+      
+      // Log to transcript
+      logTranscriptEvent(callId, {
+        type: 'tool_call',
+        tool_name: 's7433629_fancita_calls_supabase',
+        tool_description: 'Zahtevek za povratni klic osebja',
+        arguments: args,
+        call_id: message.call_id,
+        timestamp: new Date().toISOString(),
+        metadata: {
+          toolName: 's7433629_fancita_calls_supabase',
+          callId: message.call_id,
+          name: args.name,
+          tel: args.tel,
+          razlog: args.razlog,
+          jezik: args.jezik
+        }
+      });
+      
+      // Call Next.js MCP API
+      try {
+        const nextjsApiUrl = process.env.NEXTJS_API_URL || 'http://localhost:3000';
+        const mcpApiUrl = `${nextjsApiUrl}/api/mcp`;
+        
+        console.log('[sip-webhook] 🔧 Calling MCP API for callback request:', mcpApiUrl);
+        
+        const response = await fetch(mcpApiUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 's7433629_fancita_calls_supabase',
+            data: args
+          })
+        });
+
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+
+        const mcpResult = await response.json();
+        console.log('[sip-webhook] 🔧 MCP callback request result:', JSON.stringify(mcpResult, null, 2));
+
+        // Check for MCP error format (data.isError or data.content[].isError)
+        const hasError = mcpResult.data?.isError || 
+                        (mcpResult.data?.content?.[0]?.isError);
+        
+        if (mcpResult.success && !hasError) {
+          // Parse the result text if it's JSON
+          let callbackData = mcpResult.data;
+          try {
+            if (mcpResult.data?.content?.[0]?.text) {
+              const parsedText = JSON.parse(mcpResult.data.content[0].text);
+              console.log('[sip-webhook] ✅ Callback saved:', parsedText);
+              callbackData = parsedText;
+            }
+          } catch (e) {
+            console.log('[sip-webhook] ℹ️ Result text is not JSON, using as-is');
           }
-        } catch (error) {
-          console.error('[sip-webhook] ❌ Staff transfer error:', error);
-          result = { 
-            success: false, 
-            error: `Staff transfer error: ${error.message}` 
+          
+          result = {
+            success: true,
+            message: 'Callback request created successfully',
+            data: callbackData
+          };
+        } else {
+          // Extract error message from MCP format
+          const errorText = mcpResult.data?.content?.[0]?.text || 
+                           mcpResult.data?.error || 
+                           mcpResult.error || 
+                           'Callback request failed';
+          console.error('[sip-webhook] 🚨 Callback request error:', errorText);
+          result = {
+            success: false,
+            error: errorText
           };
         }
+      } catch (error) {
+        console.error('[sip-webhook] 🚨 s7433629_fancita_calls_supabase failed:', error);
+        result = {
+          success: false,
+          error: `Callback request error: ${error.message}`
+        };
       }
+    } else if (message.name === 'transfer_to_staff') {
+      // OLD: Direct phone transfer - DEPRECATED (keeping for reference)
+      console.log('[sip-webhook] ⚠️ transfer_to_staff is deprecated, use s7433629_fancita_calls_supabase instead');
+      result = {
+        success: false,
+        error: 'transfer_to_staff is deprecated, please use callback request tool'
+      };
     } else if (message.name === 'end_call') {
       // Handle call termination - DO NOT send result back to avoid Maja saying it
       const args = JSON.parse(message.arguments);

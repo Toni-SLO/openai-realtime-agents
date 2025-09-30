@@ -133,6 +133,20 @@ let mcpTools: any[] = [
       properties: {},
       required: []
     }
+  },
+  {
+    name: 's7433629_fancita_calls_supabase',
+    description: 'Create a callback request when guest needs staff assistance',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Guest name' },
+        tel: { type: 'string', description: 'Guest phone number' },
+        razlog: { type: 'string', description: 'Reason for callback (always in Croatian)' },
+        jezik: { type: 'string', description: 'Guest language code' }
+      },
+      required: ['name', 'tel', 'razlog', 'jezik']
+    }
   }
 ];
 
@@ -444,7 +458,8 @@ export async function POST(request: NextRequest) {
       's6798488_fancita_order_supabase': 's6798488_fancita_order_supabase',
       'check_availability': 'check_availability',
       's7260221_check_availability': 's7260221_check_availability',
-      's7355981_check_orders': 's7355981_check_orders'
+      's7355981_check_orders': 's7355981_check_orders',
+      's7433629_fancita_calls_supabase': 's7433629_fancita_calls_supabase'
     };
 
     const fullToolName = toolNameMap[action] || action;
